@@ -24,8 +24,7 @@ pub struct Segment {
 
 impl Segment {
     pub fn new(mut file: File, path: PathBuf) -> Self {
-        let (bloom_filter, sparse_index) =
-            create_data_structures_for_segment_file(&mut file);
+        let (bloom_filter, sparse_index) = create_data_structures_for_segment(&mut file);
 
         Self {
             file,
