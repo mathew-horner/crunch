@@ -1,5 +1,5 @@
 mod compaction;
-mod database;
+mod engine;
 mod memtable;
 mod segment;
 mod sparse_index;
@@ -10,21 +10,20 @@ use std::io::stdin;
 
 use store::StoreArgs;
 
-use crate::database::{Database, DatabaseArgs};
+use crate::engine::{Engine, EngineArgs};
 use crate::memtable::MemtableArgs;
-use crate::util::{parse_assignment, Assignment};
+use crate::util::Assignment;
 
 fn main() {
-    let database = Database::new("~/.log-kv/mydb".into(), DatabaseArgs {
+    let engine = Engine::new("~/.log-kv/mydb".into(), EngineArgs {
         memtable: MemtableArgs { capacity: 16 },
         store: StoreArgs { compaction_enabled: false, compaction_interval_seconds: 5 },
     });
-
-    db_client(database);
+    db_client(engine);
 }
 
-fn db_client(mut database: Database) {
-    println!("Log-KV");
+fn db_client(mut engine: Engine) {
+    println!("Kayvee");
     println!("The worst key-value store on the planet!");
     println!();
     println!("Here is how to use:");
@@ -42,7 +41,7 @@ fn db_client(mut database: Database) {
         let command = command.trim().to_lowercase();
         match command.as_str() {
             "exit" => {
-                database.stop().unwrap();
+                engine.stop().unwrap();
                 break;
             },
             _ => {
@@ -57,16 +56,16 @@ fn db_client(mut database: Database) {
                 let argument = tokens[1..].join(" ");
 
                 match command.as_str() {
-                    "set" => match parse_assignment(argument.as_str()) {
-                        Ok(Assignment { key, value }) => database.set(key.as_str(), value.as_str()),
+                    "set" => match Assignment::parse(argument.as_str()) {
+                        Ok(Assignment { key, value }) => engine.set(key, value),
                         Err(error) => println!("Error: {}", error),
                     },
-                    "get" => match database.get(argument.as_ref()) {
+                    "get" => match engine.get(argument.as_ref()) {
                         Some(value) => println!("{}", value),
                         None => println!("Error: Not found!"),
                     },
                     "del" => {
-                        database.delete(argument.as_ref());
+                        engine.delete(argument.as_ref());
                     },
                     _ => {
                         println!("Error: Invalid command!");

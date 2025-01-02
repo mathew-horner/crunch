@@ -1,14 +1,15 @@
-pub struct Assignment {
-    pub key: String,
-    pub value: String,
+pub struct Assignment<'a> {
+    pub key: &'a str,
+    pub value: &'a str,
 }
 
-pub fn parse_assignment(string: &str) -> Result<Assignment, String> {
-    let tokens = string.split("=").map(|t| t.trim().to_string()).collect::<Vec<String>>();
-
-    if tokens.len() != 2 {
-        return Err("String is in an invalid format!".into());
+impl<'a> Assignment<'a> {
+    /// Parse user input into an assignment operation.
+    pub fn parse(string: &'a str) -> Result<Assignment<'a>, String> {
+        // TODO: Use a proper error type like anyhow.
+        let (key, value) = string.split_once("=").ok_or_else(|| "invalid input".to_owned())?;
+        let key = key.trim();
+        let value = value.trim();
+        Ok(Assignment { key, value })
     }
-
-    Ok(Assignment { key: tokens[0].to_owned(), value: tokens[1].to_owned() })
 }

@@ -9,7 +9,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use crate::segment::Segment;
-use crate::util::parse_assignment;
+use crate::util::Assignment;
 
 pub struct CompactionParams {
     pub interval_seconds: u64,
@@ -67,8 +67,8 @@ fn do_compaction(first: &mut File, second: &mut File, path: PathBuf) -> Segment 
         let first_line: String = first_iter.peek().unwrap().as_ref().unwrap().into();
         let second_line: String = second_iter.peek().unwrap().as_ref().unwrap().into();
 
-        let first_assignment = parse_assignment(first_line.as_str()).unwrap();
-        let second_assignment = parse_assignment(second_line.as_str()).unwrap();
+        let first_assignment = Assignment::parse(first_line.as_str()).unwrap();
+        let second_assignment = Assignment::parse(second_line.as_str()).unwrap();
 
         match first_assignment.key.cmp(&second_assignment.key) {
             cmp::Ordering::Less => {
