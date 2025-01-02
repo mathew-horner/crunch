@@ -1,4 +1,5 @@
-use std::{collections::BTreeMap, ops::Range};
+use std::collections::BTreeMap;
+use std::ops::Range;
 
 pub struct SparseIndex {
     index: BTreeMap<String, u64>,
@@ -6,9 +7,7 @@ pub struct SparseIndex {
 
 impl SparseIndex {
     pub fn new() -> Self {
-        Self {
-            index: BTreeMap::new(),
-        }
+        Self { index: BTreeMap::new() }
     }
 
     pub fn get_byte_range(&self, key: &String) -> Range<Option<u64>> {

@@ -17,10 +17,7 @@ impl Default for MemtableArgs {
 
 impl Memtable {
     pub fn new(MemtableArgs { capacity }: MemtableArgs) -> Self {
-        Self {
-            tree: RBTree::new(),
-            capacity,
-        }
+        Self { tree: RBTree::new(), capacity }
     }
 
     pub fn set(&mut self, key: &str, value: &str) {

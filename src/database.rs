@@ -1,9 +1,8 @@
-use crate::{
-    memtable::{Memtable, MemtableArgs},
-    store::{Store, StoreArgs},
-};
+use std::path::PathBuf;
+use std::thread;
 
-use std::{path::PathBuf, thread};
+use crate::memtable::{Memtable, MemtableArgs};
+use crate::store::{Store, StoreArgs};
 
 pub struct Database {
     memtable: Memtable,
@@ -17,19 +16,13 @@ pub struct DatabaseArgs {
 
 impl Default for DatabaseArgs {
     fn default() -> Self {
-        Self {
-            memtable: Default::default(),
-            store: Default::default(),
-        }
+        Self { memtable: Default::default(), store: Default::default() }
     }
 }
 
 impl Database {
     pub fn new(path: PathBuf, DatabaseArgs { memtable, store }: DatabaseArgs) -> Self {
-        Self {
-            memtable: Memtable::new(memtable),
-            store: Store::new(path, store),
-        }
+        Self { memtable: Memtable::new(memtable), store: Store::new(path, store) }
     }
 
     pub fn set(&mut self, key: &str, value: &str) {

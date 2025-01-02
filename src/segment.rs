@@ -1,15 +1,12 @@
-use std::{
-    fs::File,
-    io::{prelude::*, BufReader, SeekFrom},
-    path::PathBuf,
-};
+use std::fs::File;
+use std::io::prelude::*;
+use std::io::{BufReader, SeekFrom};
+use std::path::PathBuf;
 
 use bloom::BloomFilter;
 
-use crate::{
-    sparse_index::SparseIndex,
-    util::{parse_assignment, Assignment},
-};
+use crate::sparse_index::SparseIndex;
+use crate::util::{parse_assignment, Assignment};
 
 // TODO: These should probably be configurable at the Database level.
 const BLOOM_FILTER_FALSE_POSITIVE_RATE: f32 = 0.0001;
@@ -26,12 +23,7 @@ impl Segment {
     pub fn new(mut file: File, path: PathBuf) -> Self {
         let (bloom_filter, sparse_index) = create_data_structures_for_segment(&mut file);
 
-        Self {
-            file,
-            path,
-            bloom_filter,
-            sparse_index,
-        }
+        Self { file, path, bloom_filter, sparse_index }
     }
 
     pub fn get(&mut self, key: &str) -> Option<String> {

@@ -1,21 +1,15 @@
-use std::{
-    fs::{create_dir_all, File},
-    io::prelude::*,
-    path::PathBuf,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
-    },
-    thread::{self, JoinHandle},
-};
+use std::fs::{create_dir_all, File};
+use std::io::prelude::*;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
 
 use walkdir::WalkDir;
 
-use crate::{
-    compaction::{compaction_loop, CompactionParams},
-    memtable::Memtable,
-    segment::Segment,
-};
+use crate::compaction::{compaction_loop, CompactionParams};
+use crate::memtable::Memtable;
+use crate::segment::Segment;
 
 pub struct Store {
     path: PathBuf,
@@ -31,10 +25,7 @@ pub struct StoreArgs {
 
 impl Default for StoreArgs {
     fn default() -> Self {
-        Self {
-            compaction_enabled: true,
-            compaction_interval_seconds: 600,
-        }
+        Self { compaction_enabled: true, compaction_interval_seconds: 600 }
     }
 }
 
@@ -82,16 +73,15 @@ impl Store {
     pub fn write_memtable(&mut self, memtable: &Memtable) {
         let mut files = self.segments.lock().unwrap();
         let path = self.path.clone().join(
-            // TODO: This should be based on the segment file with the highest number + 1, not the length.
-            // This is because we compact files now so segment_files.len() won't always be equal to the highest
-            // numbered segment file.
+            // TODO: This should be based on the segment file with the highest number + 1, not the
+            // length. This is because we compact files now so segment_files.len()
+            // won't always be equal to the highest numbered segment file.
             format!("segment-{}.dat", files.len() + 1),
         );
         let mut file = File::create(path.clone()).unwrap();
 
         for (key, value) in memtable.iter() {
-            file.write_all(format!("{}={}\n", key, value).as_bytes())
-                .unwrap();
+            file.write_all(format!("{}={}\n", key, value).as_bytes()).unwrap();
         }
 
         files.push(Segment::new(File::open(path.clone()).unwrap(), path));
@@ -104,10 +94,8 @@ fn initialize_store_at_path(path: &PathBuf) -> Vec<Segment> {
     if !path.exists() {
         create_dir_all(path.clone()).unwrap();
     } else {
-        let entries = WalkDir::new(path.clone())
-            .follow_links(false)
-            .into_iter()
-            .filter_map(|e| e.ok());
+        let entries =
+            WalkDir::new(path.clone()).follow_links(false).into_iter().filter_map(|e| e.ok());
 
         for entry in entries {
             let filename = entry.file_name().to_string_lossy();

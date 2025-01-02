@@ -1,17 +1,15 @@
-use std::{
-    cmp,
-    fs::{self, File},
-    io::{prelude::*, BufReader, SeekFrom},
-    path::PathBuf,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
-    },
-    thread::{self, JoinHandle},
-    time::{Duration, Instant},
-};
+use std::cmp;
+use std::fs::{self, File};
+use std::io::prelude::*;
+use std::io::{BufReader, SeekFrom};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
-use crate::{segment::Segment, util::parse_assignment};
+use crate::segment::Segment;
+use crate::util::parse_assignment;
 
 pub struct CompactionParams {
     pub interval_seconds: u64,
@@ -21,12 +19,7 @@ pub struct CompactionParams {
 }
 
 pub fn compaction_loop(
-    CompactionParams {
-        interval_seconds,
-        path,
-        segments,
-        compaction_kill_flag,
-    }: CompactionParams,
+    CompactionParams { interval_seconds, path, segments, compaction_kill_flag }: CompactionParams,
 ) -> JoinHandle<()> {
     thread::spawn(move || {
         let mut last_compaction = Instant::now();
@@ -81,16 +74,16 @@ fn do_compaction(first: &mut File, second: &mut File, path: PathBuf) -> Segment 
             cmp::Ordering::Less => {
                 new_segment_file.write(first_line.as_bytes()).unwrap();
                 first_iter.next();
-            }
+            },
             cmp::Ordering::Greater => {
                 new_segment_file.write(second_line.as_bytes()).unwrap();
                 second_iter.next();
-            }
+            },
             cmp::Ordering::Equal => {
                 new_segment_file.write(second_line.as_bytes()).unwrap();
                 first_iter.next();
                 second_iter.next();
-            }
+            },
         };
 
         new_segment_file.write("\n".as_bytes()).unwrap();
@@ -98,17 +91,13 @@ fn do_compaction(first: &mut File, second: &mut File, path: PathBuf) -> Segment 
 
     for line in first_iter {
         if let Ok(line) = line {
-            new_segment_file
-                .write(format!("{}\n", line).as_bytes())
-                .unwrap();
+            new_segment_file.write(format!("{}\n", line).as_bytes()).unwrap();
         }
     }
 
     for line in second_iter {
         if let Ok(line) = line {
-            new_segment_file
-                .write(format!("{}\n", line).as_bytes())
-                .unwrap();
+            new_segment_file.write(format!("{}\n", line).as_bytes()).unwrap();
         }
     }
 
