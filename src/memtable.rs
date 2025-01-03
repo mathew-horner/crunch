@@ -1,12 +1,23 @@
 use rbtree::{Iter, RBTree};
 
+use crate::env::parse_env;
+
 pub struct Memtable {
     tree: RBTree<String, String>,
     capacity: usize,
 }
 
+#[derive(Debug)]
 pub struct MemtableArgs {
     pub capacity: usize,
+}
+
+impl MemtableArgs {
+    /// Get configuration values from the memtable config environment variables.
+    pub fn from_env() -> Self {
+        let capacity = parse_env("memtable", "capacity", 1024);
+        Self { capacity }
+    }
 }
 
 impl Default for MemtableArgs {
@@ -16,8 +27,10 @@ impl Default for MemtableArgs {
 }
 
 impl Memtable {
-    pub fn new(MemtableArgs { capacity }: MemtableArgs) -> Self {
-        Self { tree: RBTree::new(), capacity }
+    pub fn new(args: MemtableArgs) -> Self {
+        let tree = RBTree::new();
+        log::debug!("memtable initialized with {args:?}");
+        Self { tree, capacity: args.capacity }
     }
 
     /// Set `key` to `value` in memory.
@@ -49,5 +62,10 @@ impl Memtable {
     /// Clear all data from memory.
     pub fn reset(&mut self) {
         self.tree = RBTree::new();
+    }
+
+    /// Return the number of keys the memtable should hold.
+    pub fn capacity(&self) -> usize {
+        self.capacity
     }
 }

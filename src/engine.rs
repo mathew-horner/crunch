@@ -17,7 +17,10 @@ pub struct EngineArgs {
 
 impl Engine {
     pub fn new(path: PathBuf, args: EngineArgs) -> Self {
-        Self { memtable: Memtable::new(args.memtable), store: Store::new(path, args.store) }
+        let memtable = Memtable::new(args.memtable);
+        let store = Store::new(path, args.store);
+        log::debug!("engine initialized");
+        Self { memtable, store }
     }
 
     /// Set `key` to `value`.
@@ -53,6 +56,7 @@ impl Engine {
 
     /// Clear and write the contents of the memtable to disk.
     fn flush_memtable(&mut self) {
+        log::debug!("memtable has hit capacity ({}), flushing to disk", self.memtable.capacity());
         self.store.write_memtable(&self.memtable);
         self.memtable.reset();
     }

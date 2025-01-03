@@ -27,6 +27,7 @@ pub fn compaction_loop(
             if last_compaction.elapsed().as_secs() >= interval_seconds {
                 let mut segments = segments.lock().unwrap();
                 if segments.len() >= 2 {
+                    log::debug!("starting compaction");
                     let new_segment_file;
                     let new_segment_path = path.clone().join("new-segment.dat");
                     {
@@ -46,6 +47,9 @@ pub fn compaction_loop(
                     fs::rename(new_segment_path, segments[1].path.clone()).unwrap();
 
                     segments.splice(0..2, [new_segment_file.unwrap()]);
+                    log::debug!("compaction finished");
+                } else {
+                    log::debug!("compaction loop ticked, but there was nothing to do");
                 }
                 last_compaction = Instant::now();
             }

@@ -8,6 +8,7 @@ use std::thread::{self, JoinHandle};
 use walkdir::WalkDir;
 
 use crate::compaction::{compaction_loop, CompactionParams};
+use crate::env::parse_env;
 use crate::memtable::Memtable;
 use crate::segment::Segment;
 
@@ -23,9 +24,19 @@ pub struct Store {
     compaction_join_handle: Option<JoinHandle<()>>,
 }
 
+#[derive(Debug)]
 pub struct StoreArgs {
     pub compaction_enabled: bool,
     pub compaction_interval_seconds: u64,
+}
+
+impl StoreArgs {
+    /// Get configuration values from store config environment variables.
+    pub fn from_env() -> Self {
+        let compaction_enabled = parse_env("store", "compaction_enabled", true);
+        let compaction_interval_seconds = parse_env("store", "compaction_interval_seconds", 600);
+        Self { compaction_enabled, compaction_interval_seconds }
+    }
 }
 
 impl Default for StoreArgs {
@@ -53,6 +64,7 @@ impl Store {
                 compaction_kill_flag: store.compaction_kill_flag.clone(),
             }));
         }
+        log::debug!("store initialized with {args:?}");
         store
     }
 
@@ -89,6 +101,7 @@ impl Store {
         for (key, value) in memtable.iter() {
             file.write_all(format!("{}={}\n", key, value).as_bytes()).unwrap();
         }
+        log::debug!("wrote memtable to {path:?}");
         files.push(Segment::new(File::open(path.clone()).unwrap(), path));
     }
 }
@@ -96,12 +109,13 @@ impl Store {
 fn initialize_store_at_path(path: &PathBuf) -> Vec<Segment> {
     let mut files = Vec::new();
     if !path.exists() {
-        create_dir_all(path.clone()).unwrap();
+        log::info!("no store detected at {path:?}, creating directory");
+        create_dir_all(path).unwrap();
     } else {
-        let entries =
-            WalkDir::new(path.clone()).follow_links(false).into_iter().filter_map(|e| e.ok());
-        for entry in entries {
+        log::info!("existing store detected at {path:?}");
+        for entry in WalkDir::new(path).follow_links(false).into_iter().filter_map(Result::ok) {
             let filename = entry.file_name().to_string_lossy();
+            // TODO: This is not a great way to detect / filter out non-segment files.
             if filename.starts_with("segment") {
                 let file = File::open(entry.path()).unwrap();
                 files.push(Segment::new(file, PathBuf::from(entry.path())));

@@ -1,5 +1,6 @@
 mod compaction;
 mod engine;
+mod env;
 mod memtable;
 mod segment;
 mod sparse_index;
@@ -15,9 +16,10 @@ use crate::memtable::MemtableArgs;
 use crate::util::Assignment;
 
 fn main() {
-    let engine = Engine::new("~/.log-kv/mydb".into(), EngineArgs {
-        memtable: MemtableArgs { capacity: 16 },
-        store: StoreArgs { compaction_enabled: false, compaction_interval_seconds: 5 },
+    env_logger::init();
+    let engine = Engine::new("test-db".into(), EngineArgs {
+        memtable: MemtableArgs::from_env(),
+        store: StoreArgs::from_env(),
     });
     db_client(engine);
 }
