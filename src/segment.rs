@@ -61,11 +61,11 @@ fn create_data_structures_for_segment(file: &mut File) -> (BloomFilter, SparseIn
     let mut elapsed_bytes = 0;
     file.seek(SeekFrom::Start(0)).unwrap();
 
-    for (i, line) in BufReader::new(&*file).lines().enumerate() {
+    for (idx, line) in BufReader::new(&*file).lines().enumerate() {
         if let Ok(line) = line {
             if let Ok(Assignment { key, .. }) = Assignment::parse(&line) {
                 bloom_filter.insert(&key);
-                if i % SPARSE_INDEX_RANGE_SIZE == 0 {
+                if idx % SPARSE_INDEX_RANGE_SIZE == 0 {
                     sparse_index.insert(&key, elapsed_bytes);
                 }
             }

@@ -59,10 +59,11 @@ pub fn compaction_loop(
 }
 
 fn do_compaction(first: &mut File, second: &mut File, path: PathBuf) -> Segment {
-    let mut new_segment_file = File::create(path.clone()).unwrap();
+    let mut new_segment_file = File::create(&path).unwrap();
 
     first.seek(SeekFrom::Start(0)).unwrap();
     second.seek(SeekFrom::Start(0)).unwrap();
+    log::trace!("reset segment file offsets");
 
     let mut first_iter = BufReader::new(first).lines().into_iter().peekable();
     let mut second_iter = BufReader::new(second).lines().into_iter().peekable();
@@ -73,17 +74,21 @@ fn do_compaction(first: &mut File, second: &mut File, path: PathBuf) -> Segment 
 
         let first_assignment = Assignment::parse(first_line.as_str()).unwrap();
         let second_assignment = Assignment::parse(second_line.as_str()).unwrap();
+        log::trace!("stitching {first_line} vs {second_line}");
 
         match first_assignment.key.cmp(&second_assignment.key) {
             cmp::Ordering::Less => {
+                log::trace!("left ({first_line}) -> segment file");
                 new_segment_file.write(first_line.as_bytes()).unwrap();
                 first_iter.next();
             },
             cmp::Ordering::Greater => {
+                log::trace!("right ({second_line}) -> segment file");
                 new_segment_file.write(second_line.as_bytes()).unwrap();
                 second_iter.next();
             },
             cmp::Ordering::Equal => {
+                log::trace!("equivalent keys; deduplicating and writing to segment file");
                 new_segment_file.write(second_line.as_bytes()).unwrap();
                 first_iter.next();
                 second_iter.next();
@@ -95,15 +100,40 @@ fn do_compaction(first: &mut File, second: &mut File, path: PathBuf) -> Segment 
 
     for line in first_iter {
         if let Ok(line) = line {
+            log::trace!("left ({line}) -> segment file");
             new_segment_file.write(format!("{}\n", line).as_bytes()).unwrap();
         }
     }
 
     for line in second_iter {
         if let Ok(line) = line {
+            log::trace!("right ({line}) -> segment file");
             new_segment_file.write(format!("{}\n", line).as_bytes()).unwrap();
         }
     }
 
     Segment::new(new_segment_file, path)
+}
+
+#[cfg(test)]
+mod test {
+    use fs::{create_dir, remove_dir_all};
+
+    use super::*;
+
+    #[test]
+    fn compaction() {
+        env_logger::init();
+        remove_dir_all("./test-db-compaction").unwrap();
+        create_dir("./test-db-compaction").unwrap();
+        let mut file1 = File::create_new("./test-db-compaction/segment-1.dat").unwrap();
+        let mut file2 = File::create_new("./test-db-compaction/segment-2.dat").unwrap();
+        file1.write_all(b"a=1\nc=3\ne=5").unwrap();
+        file2.write_all(b"b=2\nd=4\nf=6").unwrap();
+        let mut segment = do_compaction(&mut file1, &mut file2, PathBuf::from("segment-3.dat"));
+        let mut buffer = String::new();
+        segment.file.read_to_string(&mut buffer).unwrap();
+        assert_eq!(buffer, "a=1\nb=2\nc=3\nd=4\ne=5\nf=6");
+        remove_dir_all("./test-db-compaction").unwrap();
+    }
 }
