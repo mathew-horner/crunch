@@ -17,8 +17,9 @@ pub struct EngineArgs {
 
 impl Engine {
     pub fn new(path: PathBuf, args: EngineArgs) -> Self {
-        let memtable = Memtable::new(args.memtable);
+        let mut memtable = Memtable::new(args.memtable);
         let store = Store::new(path, args.store);
+        store.replay_wal(&mut memtable);
         log::debug!("engine initialized");
         Self { memtable, store }
     }
@@ -29,7 +30,7 @@ impl Engine {
     /// written to the append-only WAL and stored in the memtable at write time.
     /// Data is flushed to segment files *asynchronously*.
     pub fn set(&mut self, key: &str, value: &str) {
-        // TODO: This is not durable, we need to write updates to a WAL.
+        self.store.write_ahead(key, value);
         self.memtable.set(key, value);
         if self.memtable.full() {
             self.flush_memtable();
