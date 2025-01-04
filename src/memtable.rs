@@ -41,7 +41,10 @@ impl Memtable {
     /// Get the value for `key` in memory, if any.
     pub fn get(&self, key: &str) -> Option<String> {
         // TODO: Don't re-allocate the key here.
-        self.tree.get(&key.into()).map(ToOwned::to_owned)
+        self.tree
+            .get(&key.into())
+            .inspect(|_| log::trace!("found {key} in memtable"))
+            .map(ToOwned::to_owned)
     }
 
     /// Delete the `key` from memory.

@@ -39,7 +39,7 @@ impl Segment {
         let range = self.sparse_index.get_byte_range(key);
         let start = range.start.unwrap_or(0);
         self.file.seek(SeekFrom::Start(start)).unwrap();
-        log::debug!("byte range constrained to {range:?}");
+        log::trace!("byte range constrained to {range:?}");
 
         let mut elapsed_bytes = start;
         for (k, v) in PairIter::new(&mut self.file) {
@@ -47,6 +47,7 @@ impl Segment {
                 break;
             }
             if k == key {
+                log::trace!("found {key} in {:?}", self.path);
                 return Some(v);
             }
             elapsed_bytes += (k.as_bytes().len() + v.as_bytes().len() + 8) as u64;
@@ -89,7 +90,6 @@ fn create_data_structures_for_segment(
     let mut elapsed_bytes = 0;
 
     for (idx, (key, value)) in PairIter::from_start(file).enumerate() {
-        log::trace!("{key}: {value}");
         bloom_filter.insert(&key);
         if idx % SPARSE_INDEX_RANGE_SIZE == 0 {
             sparse_index.insert(&key, elapsed_bytes);
