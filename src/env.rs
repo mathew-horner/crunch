@@ -26,7 +26,7 @@ impl FromEnv for usize {
 pub fn parse_env<T: FromEnv>(namespace: &str, variable_name: &str, default: T) -> T {
     let namespace = namespace.to_uppercase();
     let variable_name = variable_name.to_uppercase();
-    std::env::var(&format!("KAYVEE_{namespace}__{variable_name}"))
+    std::env::var(&format!("CRUNCH_{namespace}__{variable_name}"))
         .map(|value| T::from_env(value.as_str()))
         .unwrap_or(default)
 }

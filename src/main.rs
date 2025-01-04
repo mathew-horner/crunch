@@ -27,7 +27,7 @@ fn main() {
 }
 
 fn db_client(mut engine: Engine) {
-    println!("Kayvee");
+    println!("Crunch");
     println!("The worst key-value store on the planet!");
     println!();
     println!("Here is how to use:");
