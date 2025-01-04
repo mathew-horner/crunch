@@ -1,5 +1,5 @@
 use std::cmp;
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::prelude::*;
 use std::io::{BufReader, SeekFrom};
 use std::path::PathBuf;
@@ -59,7 +59,8 @@ pub fn compaction_loop(
 }
 
 fn do_compaction(first: &mut File, second: &mut File, path: PathBuf) -> Segment {
-    let mut new_segment_file = File::create(&path).unwrap();
+    let mut new_segment_file =
+        OpenOptions::new().create_new(true).write(true).read(true).open(&path).unwrap();
 
     first.seek(SeekFrom::Start(0)).unwrap();
     second.seek(SeekFrom::Start(0)).unwrap();
@@ -117,23 +118,16 @@ fn do_compaction(first: &mut File, second: &mut File, path: PathBuf) -> Segment 
 
 #[cfg(test)]
 mod test {
-    use fs::{create_dir, remove_dir_all};
-
     use super::*;
+    use crate::test::StoreFixture;
 
     #[test]
     fn compaction() {
         env_logger::init();
-        remove_dir_all("./test-db-compaction").unwrap();
-        create_dir("./test-db-compaction").unwrap();
-        let mut file1 = File::create_new("./test-db-compaction/segment-1.dat").unwrap();
-        let mut file2 = File::create_new("./test-db-compaction/segment-2.dat").unwrap();
-        file1.write_all(b"a=1\nc=3\ne=5").unwrap();
-        file2.write_all(b"b=2\nd=4\nf=6").unwrap();
-        let mut segment = do_compaction(&mut file1, &mut file2, PathBuf::from("segment-3.dat"));
-        let mut buffer = String::new();
-        segment.file.read_to_string(&mut buffer).unwrap();
-        assert_eq!(buffer, "a=1\nb=2\nc=3\nd=4\ne=5\nf=6");
-        remove_dir_all("./test-db-compaction").unwrap();
+        let mut fixture = StoreFixture::init("./test-db-compaction");
+        let mut file1 = fixture.create_segment_file("a=1\nc=3\ne=5");
+        let mut file2 = fixture.create_segment_file("b=2\nd=4\nf=6");
+        let mut segment = do_compaction(&mut file1, &mut file2, fixture.allocate_segment_file());
+        assert_eq!(segment.read_to_string(), "a=1\nb=2\nc=3\nd=4\ne=5\nf=6\n");
     }
 }

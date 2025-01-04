@@ -50,6 +50,18 @@ impl Segment {
         }
         None
     }
+
+    /// Read the entirety of the file to a string.
+    ///
+    /// This method is used for automated tests.
+    #[cfg(test)]
+    pub fn read_to_string(&mut self) -> String {
+        self.file.seek(SeekFrom::Start(0)).unwrap();
+        let mut buffer = String::new();
+        self.file.read_to_string(&mut buffer).unwrap();
+        self.file.seek(SeekFrom::Start(0)).unwrap();
+        buffer
+    }
 }
 
 fn create_data_structures_for_segment(file: &mut File) -> (BloomFilter, SparseIndex) {

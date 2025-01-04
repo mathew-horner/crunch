@@ -5,6 +5,8 @@ mod memtable;
 mod segment;
 mod sparse_index;
 mod store;
+#[cfg(test)]
+mod test;
 mod util;
 
 use std::io::stdin;
