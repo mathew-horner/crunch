@@ -61,4 +61,9 @@ impl Engine {
         self.store.write_memtable(&self.memtable);
         self.memtable.reset();
     }
+
+    /// Return a reference to the underlying [`Store`].
+    pub fn store(&self) -> &Store {
+        &self.store
+    }
 }

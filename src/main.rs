@@ -34,6 +34,7 @@ fn db_client(mut engine: Engine) {
     println!("SET key=value");
     println!("GET key");
     println!("DEL key");
+    println!("INSPECT-SEGMENT segment");
     println!("EXIT");
     println!();
     println!("That's it - Have fun!");
@@ -70,6 +71,9 @@ fn db_client(mut engine: Engine) {
                     },
                     "del" => {
                         engine.delete(argument.as_ref());
+                    },
+                    "inspect-segment" => {
+                        engine.store().inspect_segment(argument.as_ref());
                     },
                     _ => {
                         println!("Error: Invalid command!");

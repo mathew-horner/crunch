@@ -12,7 +12,7 @@ impl SparseIndex {
         Self { index: BTreeMap::new() }
     }
 
-    pub fn get_byte_range(&self, key: &String) -> Range<Option<u64>> {
+    pub fn get_byte_range(&self, key: &str) -> Range<Option<u64>> {
         // TODO: Can't we binary search here?
         // TODO: Also, can't we return None if there is no way the key is in this file?
         let mut iter = self.index.iter().peekable();
@@ -26,7 +26,7 @@ impl SparseIndex {
                 Some(pair) => Some(*pair.1),
                 None => None,
             };
-            if *key >= *curr.0 && next.is_some() && *key < *next.unwrap().0 {
+            if key >= curr.0 && next.is_some() && key < next.unwrap().0 {
                 break;
             }
         }
@@ -36,5 +36,9 @@ impl SparseIndex {
     /// Index a `key` with the given `offset`.
     pub fn insert(&mut self, key: &str, offset: u64) {
         self.index.insert(key.into(), offset);
+    }
+
+    pub fn inner(&self) -> &BTreeMap<String, u64> {
+        &self.index
     }
 }

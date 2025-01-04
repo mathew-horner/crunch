@@ -104,7 +104,18 @@ impl Store {
         );
         let mut file = File::create(path.clone()).unwrap();
         for (key, value) in memtable.iter() {
-            file.write_all(format!("{}={}\n", key, value).as_bytes()).unwrap();
+            let key_bytes = key.as_bytes();
+            let value_bytes = value.as_bytes();
+
+            // Add 8 bytes here for the two u32 length prefixes.
+            let mut bytes = Vec::with_capacity(key_bytes.len() + value_bytes.len() + 8);
+
+            for component in [key_bytes, value_bytes] {
+                let len = component.len() as u32;
+                bytes.extend(len.to_be_bytes());
+                bytes.extend(component);
+            }
+            file.write_all(&bytes).unwrap();
         }
         log::debug!("wrote memtable to {path:?}");
         files.push(Segment::new(File::open(path.clone()).unwrap(), path));
@@ -122,6 +133,17 @@ impl Store {
     /// The WAL is an important mechanism for crash recovery, and speedy writes.
     pub fn replay_wal(&self, memtable: &mut Memtable) {
         self.wal.replay(memtable);
+    }
+
+    /// Print details about the inner state of the segment file, if it exists.
+    pub fn inspect_segment(&self, filename: &str) {
+        let path = self.path.join(filename);
+        let guard = self.segments.lock().unwrap();
+        let Some(segment) = guard.iter().find(|segment| segment.path == path) else {
+            println!("Error: segment not found");
+            return;
+        };
+        segment.inspect();
     }
 }
 
