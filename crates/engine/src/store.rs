@@ -1,6 +1,5 @@
 use std::fs::{create_dir_all, remove_file, File, OpenOptions};
 use std::io::prelude::*;
-use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -11,8 +10,7 @@ use walkdir::WalkDir;
 use crate::compaction::{compaction_loop, CompactionParams};
 use crate::env::parse_env;
 use crate::memtable::Memtable;
-use crate::segment::Segment;
-use crate::util::Assignment;
+use crate::segment::{self, PairIter, Segment};
 
 pub struct Store {
     path: PathBuf,
@@ -104,18 +102,7 @@ impl Store {
         );
         let mut file = File::create(path.clone()).unwrap();
         for (key, value) in memtable.iter() {
-            let key_bytes = key.as_bytes();
-            let value_bytes = value.as_bytes();
-
-            // Add 8 bytes here for the two u32 length prefixes.
-            let mut bytes = Vec::with_capacity(key_bytes.len() + value_bytes.len() + 8);
-
-            for component in [key_bytes, value_bytes] {
-                let len = component.len() as u32;
-                bytes.extend(len.to_be_bytes());
-                bytes.extend(component);
-            }
-            file.write_all(&bytes).unwrap();
+            segment::write(&mut file, key, value);
         }
         log::debug!("wrote memtable to {path:?}");
         files.push(Segment::new(File::open(path.clone()).unwrap(), path));
@@ -193,17 +180,14 @@ impl Wal {
         self.file = open_wal(&self.store_path);
     }
 
-    fn write(&mut self, key: &str, val: &str) {
-        let data = format!("{key}={val}\n");
-        self.file.write_all(data.as_bytes()).unwrap();
+    fn write(&mut self, key: &str, value: &str) {
+        segment::write(&mut self.file, key, value);
     }
 
     fn replay(&self, memtable: &mut Memtable) {
-        let file = File::open(self.path()).unwrap();
-        let mut lines = BufReader::new(file).lines();
-        while let Some(Ok(line)) = lines.next() {
-            let assignment = Assignment::parse(&line).unwrap();
-            memtable.set(assignment.key, assignment.value);
+        let mut file = File::open(self.path()).unwrap();
+        for (key, value) in PairIter::from_start(&mut file) {
+            memtable.set(key, value);
         }
     }
 

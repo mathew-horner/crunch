@@ -101,17 +101,17 @@ fn create_data_structures_for_segment(
 }
 
 /// Iterates over the key-value pairs in a segment file.
-struct PairIter<'a> {
+pub struct PairIter<'a> {
     file: &'a mut File,
 }
 
 impl<'a> PairIter<'a> {
-    fn new(file: &'a mut File) -> Self {
+    pub fn new(file: &'a mut File) -> Self {
         Self { file }
     }
 
     /// Seeks to the start of the file before iteration.
-    fn from_start(file: &'a mut File) -> Self {
+    pub fn from_start(file: &'a mut File) -> Self {
         file.seek(SeekFrom::Start(0)).unwrap();
         Self::new(file)
     }
@@ -141,4 +141,24 @@ impl Iterator for PairIter<'_> {
         let value = std::str::from_utf8(&value_buffer).unwrap();
         Some((key.to_owned(), value.to_owned()))
     }
+}
+
+/// Write a key-value pair to a data file in the custom binary format.
+pub fn write(file: &mut File, key: &str, value: &str) {
+    let key_bytes = key.as_bytes();
+    let value_bytes = value.as_bytes();
+
+    // Add 8 bytes here for the two u32 length prefixes.
+    let mut bytes = Vec::with_capacity(key_bytes.len() + value_bytes.len() + 8);
+
+    for component in [key_bytes, value_bytes] {
+        // TODO: usize -> u32 is not a safe cast, in theory.
+        // We should explicitly check for and reject if the key or value
+        // is longer than u32::MAX.
+        let len = component.len() as u32;
+
+        bytes.extend(len.to_be_bytes());
+        bytes.extend(component);
+    }
+    file.write_all(&bytes).unwrap();
 }
