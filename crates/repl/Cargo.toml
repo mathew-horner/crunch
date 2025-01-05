@@ -1,0 +1,8 @@
+[package]
+name = "crunch-repl"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+crunch-engine = { path = "../engine" }
+env_logger.workspace = true

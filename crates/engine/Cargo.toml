@@ -1,0 +1,11 @@
+[package]
+name = "crunch-engine"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bloom.workspace = true
+env_logger.workspace = true
+log.workspace = true
+rbtree.workspace = true
+walkdir.workspace = true

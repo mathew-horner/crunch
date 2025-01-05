@@ -1,21 +1,9 @@
-mod compaction;
-mod engine;
-mod env;
-mod memtable;
-mod segment;
-mod sparse_index;
-mod store;
-#[cfg(test)]
-mod test;
-mod util;
-
 use std::io::stdin;
 
-use store::StoreArgs;
-
-use crate::engine::{Engine, EngineArgs};
-use crate::memtable::MemtableArgs;
-use crate::util::Assignment;
+use crunch_engine::engine::{Engine, EngineArgs};
+use crunch_engine::memtable::MemtableArgs;
+use crunch_engine::store::StoreArgs;
+use crunch_engine::util::Assignment;
 
 fn main() {
     env_logger::init();
@@ -23,10 +11,10 @@ fn main() {
         memtable: MemtableArgs::from_env(),
         store: StoreArgs::from_env(),
     });
-    db_client(engine);
+    repl(engine);
 }
 
-fn db_client(mut engine: Engine) {
+fn repl(mut engine: Engine) {
     println!("Crunch");
     println!("The worst key-value store on the planet!");
     println!();
