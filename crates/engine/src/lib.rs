@@ -1,6 +1,7 @@
 pub mod compaction;
 pub mod engine;
 pub mod env;
+pub mod error;
 pub mod memtable;
 pub mod segment;
 pub mod sparse_index;

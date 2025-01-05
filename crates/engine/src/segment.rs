@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use bloom::BloomFilter;
 
+use crate::error::{PairComponent, WriteError};
 use crate::sparse_index::SparseIndex;
 
 // TODO: These should probably be configurable at the Database level.
@@ -144,21 +145,23 @@ impl Iterator for PairIter<'_> {
 }
 
 /// Write a key-value pair to a data file in the custom binary format.
-pub fn write(file: &mut File, key: &str, value: &str) {
+pub fn write(file: &mut File, key: &str, value: &str) -> Result<(), WriteError> {
     let key_bytes = key.as_bytes();
     let value_bytes = value.as_bytes();
 
     // Add 8 bytes here for the two u32 length prefixes.
     let mut bytes = Vec::with_capacity(key_bytes.len() + value_bytes.len() + 8);
 
-    for component in [key_bytes, value_bytes] {
-        // TODO: usize -> u32 is not a safe cast, in theory.
-        // We should explicitly check for and reject if the key or value
-        // is longer than u32::MAX.
-        let len = component.len() as u32;
-
-        bytes.extend(len.to_be_bytes());
-        bytes.extend(component);
+    for (component_bytes, component) in
+        [(key_bytes, PairComponent::Key), (value_bytes, PairComponent::Value)]
+    {
+        let size = component_bytes.len();
+        let size = u32::try_from(size)
+            .map_err(|_| WriteError::TooLarge(component, size, u32::max_value() as usize))?;
+        bytes.extend(size.to_be_bytes());
+        bytes.extend(component_bytes);
     }
-    file.write_all(&bytes).unwrap();
+
+    file.write_all(&bytes)?;
+    Ok(())
 }

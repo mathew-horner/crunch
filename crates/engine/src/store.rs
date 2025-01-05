@@ -102,7 +102,8 @@ impl Store {
         );
         let mut file = File::create(path.clone()).unwrap();
         for (key, value) in memtable.iter() {
-            segment::write(&mut file, key, value);
+            // TODO: Don't unwrap.
+            segment::write(&mut file, key, value).unwrap();
         }
         log::debug!("wrote memtable to {path:?}");
         files.push(Segment::new(File::open(path.clone()).unwrap(), path));
@@ -181,7 +182,8 @@ impl Wal {
     }
 
     fn write(&mut self, key: &str, value: &str) {
-        segment::write(&mut self.file, key, value);
+        // TODO: Don't unwrap.
+        segment::write(&mut self.file, key, value).unwrap();
     }
 
     fn replay(&self, memtable: &mut Memtable) {
