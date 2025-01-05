@@ -74,9 +74,7 @@ impl Segment {
     /// associated in-memory resources.
     pub fn inspect(&self) {
         println!("Sparse Index");
-        for (key, offset) in self.sparse_index.inner() {
-            println!("{key} @ {offset}");
-        }
+        self.sparse_index.inner().iter().for_each(|(key, offset)| println!("{key} @ {offset}"));
     }
 }
 

@@ -99,18 +99,14 @@ fn do_compaction(first: &mut File, second: &mut File, path: PathBuf) -> Segment 
         new_segment_file.write("\n".as_bytes()).unwrap();
     }
 
-    for line in first_iter {
-        if let Ok(line) = line {
-            log::trace!("left ({line}) -> segment file");
-            new_segment_file.write(format!("{}\n", line).as_bytes()).unwrap();
-        }
+    while let Some(Ok(line)) = first_iter.next() {
+        log::trace!("left ({line}) -> segment file");
+        new_segment_file.write(format!("{}\n", line).as_bytes()).unwrap();
     }
 
-    for line in second_iter {
-        if let Ok(line) = line {
-            log::trace!("right ({line}) -> segment file");
-            new_segment_file.write(format!("{}\n", line).as_bytes()).unwrap();
-        }
+    while let Some(Ok(line)) = second_iter.next() {
+        log::trace!("right ({line}) -> segment file");
+        new_segment_file.write(format!("{}\n", line).as_bytes()).unwrap();
     }
 
     Segment::new(new_segment_file, path)

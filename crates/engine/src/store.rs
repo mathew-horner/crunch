@@ -1,5 +1,4 @@
 use std::fs::{create_dir_all, remove_file, File, OpenOptions};
-use std::io::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -74,12 +73,7 @@ impl Store {
     /// Read the value for `key` from disk, if any.
     pub fn get(&mut self, key: &str) -> Option<String> {
         let mut segments = self.segments.lock().unwrap();
-        for segment in segments.iter_mut().rev() {
-            if let Some(value) = segment.get(key) {
-                return Some(value);
-            }
-        }
-        None
+        segments.iter_mut().rev().find_map(|segment| segment.get(key))
     }
 
     /// Gracefully shutdown the store.
@@ -188,9 +182,7 @@ impl Wal {
 
     fn replay(&self, memtable: &mut Memtable) {
         let mut file = File::open(self.path()).unwrap();
-        for (key, value) in PairIter::from_start(&mut file) {
-            memtable.set(key, value);
-        }
+        PairIter::from_start(&mut file).for_each(|(key, value)| memtable.set(key, value))
     }
 
     fn path(&self) -> PathBuf {
