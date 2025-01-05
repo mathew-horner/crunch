@@ -1,9 +1,9 @@
-use rbtree::{Iter, RBTree};
+use std::collections::{btree_map, BTreeMap};
 
 use crate::env::parse_env;
 
 pub struct Memtable {
-    tree: RBTree<String, String>,
+    tree: BTreeMap<String, String>,
     capacity: usize,
 }
 
@@ -28,28 +28,28 @@ impl Default for MemtableArgs {
 
 impl Memtable {
     pub fn new(args: MemtableArgs) -> Self {
-        let tree = RBTree::new();
+        let tree = BTreeMap::new();
         log::debug!("memtable initialized with {args:?}");
         Self { tree, capacity: args.capacity }
     }
 
     /// Set `key` to `value` in memory.
-    pub fn set(&mut self, key: &str, value: &str) {
-        self.tree.replace_or_insert(key.into(), value.into());
+    pub fn set(&mut self, key: impl Into<String>, value: impl Into<String>) {
+        self.tree.insert(key.into(), value.into());
     }
 
     /// Get the value for `key` in memory, if any.
     pub fn get(&self, key: &str) -> Option<String> {
         // TODO: Don't re-allocate the key here.
         self.tree
-            .get(&key.into())
+            .get(key)
             .inspect(|_| log::trace!("found {key} in memtable"))
             .map(ToOwned::to_owned)
     }
 
     /// Delete the `key` from memory.
     pub fn delete(&mut self, key: &str) {
-        self.tree.remove(&key.into());
+        self.tree.remove(key);
     }
 
     /// Return whether the memtable has reached its configured `capacity`.
@@ -58,13 +58,13 @@ impl Memtable {
     }
 
     /// Return an iterator over the key:value pairs in memory.
-    pub fn iter(&self) -> Iter<String, String> {
+    pub fn iter(&self) -> btree_map::Iter<String, String> {
         self.tree.iter()
     }
 
     /// Clear all data from memory.
     pub fn reset(&mut self) {
-        self.tree = RBTree::new();
+        self.tree = BTreeMap::new();
     }
 
     /// Return the number of keys the memtable should hold.

@@ -8,5 +8,4 @@ anyhow.workspace = true
 bloom.workspace = true
 env_logger.workspace = true
 log.workspace = true
-rbtree.workspace = true
 walkdir.workspace = true
