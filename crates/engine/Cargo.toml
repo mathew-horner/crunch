@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+anyhow.workspace = true
 bloom.workspace = true
 env_logger.workspace = true
 log.workspace = true

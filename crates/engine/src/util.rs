@@ -1,3 +1,5 @@
+use anyhow::{anyhow, Result};
+
 pub struct Assignment<'a> {
     pub key: &'a str,
     pub value: &'a str,
@@ -5,9 +7,8 @@ pub struct Assignment<'a> {
 
 impl<'a> Assignment<'a> {
     /// Parse user input into an assignment operation.
-    pub fn parse(string: &'a str) -> Result<Assignment<'a>, String> {
-        // TODO: Use a proper error type like anyhow.
-        let (key, value) = string.split_once("=").ok_or_else(|| "invalid input".to_owned())?;
+    pub fn parse(string: &'a str) -> Result<Assignment<'a>> {
+        let (key, value) = string.split_once("=").ok_or_else(|| anyhow!("invalid input"))?;
         let key = key.trim();
         let value = value.trim();
         Ok(Assignment { key, value })
