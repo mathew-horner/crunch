@@ -25,7 +25,12 @@ pub fn compaction_loop(
         let mut last_compaction = Instant::now();
         while !compaction_kill_flag.load(Ordering::Relaxed) {
             if last_compaction.elapsed().as_secs() >= interval_seconds {
+                // TODO: It's really bad that we lock the segment files here. This will make our
+                // database completely unavailable to incoming read and write requests while a
+                // compaction is taking place. Which is completely unnecessary since the
+                // compaction is not modifying the existing segment files.
                 let mut segments = segments.lock().unwrap();
+
                 if segments.len() >= 2 {
                     log::debug!("starting compaction");
                     let new_segment_file;

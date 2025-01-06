@@ -1,0 +1,4 @@
+- [ ] Deletion of records does not work anymore, we need to append a recognizable tombstone in the binary format when we delete.
+- [ ] Handle partially written records which may corrupt data files.
+- [ ] Look into SSTable region compression?
+- [ ] Memtable flush in background thread, swap to new memtable to keep serving traffic.
