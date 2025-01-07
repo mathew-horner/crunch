@@ -8,5 +8,6 @@ anyhow.workspace = true
 bloom.workspace = true
 env_logger.workspace = true
 log.workspace = true
+rand.workspace = true
 thiserror.workspace = true
 walkdir.workspace = true
