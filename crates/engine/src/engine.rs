@@ -40,13 +40,14 @@ impl Engine {
     /// Get the value for `key`, if any.
     pub fn get(&mut self, key: &str) -> Option<String> {
         if let Some(value) = self.memtable.get(key) {
-            return Some(value);
+            return value;
         }
         self.store.get(key)
     }
 
     /// Delete the `key`.
     pub fn delete(&mut self, key: &str) {
+        self.store.tombstone(key);
         self.memtable.delete(key);
     }
 

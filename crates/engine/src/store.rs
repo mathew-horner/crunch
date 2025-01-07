@@ -9,7 +9,7 @@ use walkdir::WalkDir;
 use crate::compaction::{compaction_loop, CompactionParams};
 use crate::env::parse_env;
 use crate::memtable::Memtable;
-use crate::segment::{self, PairIter, Segment};
+use crate::segment::{self, Entry, EntryIter, Segment};
 
 pub struct Store {
     path: PathBuf,
@@ -73,7 +73,13 @@ impl Store {
     /// Read the value for `key` from disk, if any.
     pub fn get(&mut self, key: &str) -> Option<String> {
         let mut segments = self.segments.lock().unwrap();
-        segments.iter_mut().rev().find_map(|segment| segment.get(key))
+        for segment in segments.iter_mut().rev() {
+            match segment.get(key) {
+                Some(value) => return value,
+                _ => {},
+            };
+        }
+        None
     }
 
     /// Gracefully shutdown the store.
@@ -96,13 +102,20 @@ impl Store {
         );
         let mut file = File::create(path.clone()).unwrap();
         for (key, value) in memtable.iter() {
-            // TODO: Don't unwrap.
-            segment::write(&mut file, key, value).unwrap();
+            match value {
+                Some(value) => segment::write(&mut file, key, value).unwrap(),
+                None => segment::tombstone(&mut file, key).unwrap(),
+            }
         }
         log::debug!("wrote memtable to {path:?}");
         files.push(Segment::new(File::open(path.clone()).unwrap(), path));
         drop(files);
         self.wal.clear();
+    }
+
+    /// Append a tombstone to the WAL to indicate that a key should be deleted.
+    pub fn tombstone(&mut self, key: &str) {
+        self.wal.tombstone(key);
     }
 
     /// Append an assignment to the WAL.
@@ -180,9 +193,19 @@ impl Wal {
         segment::write(&mut self.file, key, value).unwrap();
     }
 
+    fn tombstone(&mut self, key: &str) {
+        // TODO: Don't unwrap.
+        segment::tombstone(&mut self.file, key).unwrap();
+    }
+
     fn replay(&self, memtable: &mut Memtable) {
         let mut file = File::open(self.path()).unwrap();
-        PairIter::from_start(&mut file).for_each(|(key, value)| memtable.set(key, value))
+        EntryIter::from_start(&mut file).for_each(|entry| {
+            match entry {
+                Entry::Assignment { key, value } => memtable.set(key, value),
+                Entry::Tombstone { key } => memtable.delete(&key),
+            };
+        })
     }
 
     fn path(&self) -> PathBuf {

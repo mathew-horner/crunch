@@ -12,6 +12,8 @@ use crate::sparse_index::SparseIndex;
 const BLOOM_FILTER_FALSE_POSITIVE_RATE: f32 = 0.0001;
 const SPARSE_INDEX_RANGE_SIZE: usize = 4;
 
+type Value = Option<String>;
+
 pub struct Segment {
     pub file: File,
     pub path: PathBuf,
@@ -26,7 +28,7 @@ impl Segment {
     }
 
     /// Read the value for `key` from this file, if any.
-    pub fn get(&mut self, key: &str) -> Option<String> {
+    pub fn get(&mut self, key: &str) -> Option<Value> {
         log::trace!("looking in {:?} for {key}", self.path);
 
         // Each lookup in the bloom filter has a chance of being a false positive, but
@@ -43,15 +45,22 @@ impl Segment {
         log::trace!("byte range constrained to {range:?}");
 
         let mut elapsed_bytes = start;
-        for (k, v) in PairIter::new(&mut self.file) {
+        for entry in EntryIter::new(&mut self.file) {
             if range.end.is_some() && elapsed_bytes >= range.end.unwrap() {
                 break;
             }
-            if k == key {
-                log::trace!("found {key} in {:?}", self.path);
-                return Some(v);
-            }
-            elapsed_bytes += (k.as_bytes().len() + v.as_bytes().len() + 8) as u64;
+            match entry {
+                Entry::Assignment { key: k, value } if k == key => {
+                    log::trace!("found {key} in {:?}", self.path);
+                    return Some(Some(value));
+                },
+                Entry::Tombstone { key: k } if k == key => {
+                    log::trace!("found tombstone for {key} in {:?}", self.path);
+                    return Some(None);
+                },
+                _ => {},
+            };
+            elapsed_bytes += entry.stride() as u64;
         }
 
         log::trace!("{key} was not in {:?}", self.path);
@@ -82,29 +91,29 @@ fn create_data_structures_for_segment(
     file: &mut File,
     path: &PathBuf,
 ) -> (BloomFilter, SparseIndex) {
-    let size = PairIter::from_start(file).count() as u32;
+    let size = EntryIter::from_start(file).count() as u32;
     log::trace!("size of {path:?}: {size}");
     let mut bloom_filter = BloomFilter::with_rate(BLOOM_FILTER_FALSE_POSITIVE_RATE, size);
     let mut sparse_index = SparseIndex::new();
     let mut elapsed_bytes = 0;
 
-    for (idx, (key, value)) in PairIter::from_start(file).enumerate() {
-        bloom_filter.insert(&key);
+    for (idx, entry) in EntryIter::from_start(file).enumerate() {
+        bloom_filter.insert(entry.key());
         if idx % SPARSE_INDEX_RANGE_SIZE == 0 {
-            sparse_index.insert(&key, elapsed_bytes);
+            sparse_index.insert(entry.key(), elapsed_bytes);
         }
-        elapsed_bytes += (key.as_bytes().len() + value.as_bytes().len() + 8) as u64;
+        elapsed_bytes += entry.stride() as u64;
     }
 
     (bloom_filter, sparse_index)
 }
 
-/// Iterates over the key-value pairs in a segment file.
-pub struct PairIter<'a> {
+/// Iterates over the entries in a segment file.
+pub struct EntryIter<'a> {
     file: &'a mut File,
 }
 
-impl<'a> PairIter<'a> {
+impl<'a> EntryIter<'a> {
     pub fn new(file: &'a mut File) -> Self {
         Self { file }
     }
@@ -116,29 +125,98 @@ impl<'a> PairIter<'a> {
     }
 }
 
-impl Iterator for PairIter<'_> {
-    type Item = (String, String);
+impl Iterator for EntryIter<'_> {
+    type Item = Entry;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let mut size_bytes = [0; 4];
-        match self.file.read_exact(&mut size_bytes) {
+        let mut indicator = [0; 1];
+        match self.file.read_exact(&mut indicator) {
             Ok(_) => {},
             Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => return None,
             error => error.unwrap(),
         };
-        let size = u32::from_be_bytes(size_bytes);
-        let mut key_buffer = vec![0; size as usize];
-        self.file.read_exact(&mut key_buffer).unwrap();
 
-        let mut size_bytes = [0; 4];
-        self.file.read_exact(&mut size_bytes).unwrap();
-        let size = u32::from_be_bytes(size_bytes);
-        let mut value_buffer = vec![0; size as usize];
-        self.file.read_exact(&mut value_buffer).unwrap();
+        match EntryIndicator::from_u8_opt(indicator[0]) {
+            Some(EntryIndicator::Assignment) => {
+                let mut size_bytes = [0; 4];
+                self.file.read_exact(&mut size_bytes).unwrap();
+                let size = u32::from_be_bytes(size_bytes);
+                let mut key_buffer = vec![0; size as usize];
+                self.file.read_exact(&mut key_buffer).unwrap();
 
-        let key = std::str::from_utf8(&key_buffer).unwrap();
-        let value = std::str::from_utf8(&value_buffer).unwrap();
-        Some((key.to_owned(), value.to_owned()))
+                let mut size_bytes = [0; 4];
+                self.file.read_exact(&mut size_bytes).unwrap();
+                let size = u32::from_be_bytes(size_bytes);
+                let mut value_buffer = vec![0; size as usize];
+                self.file.read_exact(&mut value_buffer).unwrap();
+
+                let key = std::str::from_utf8(&key_buffer).unwrap();
+                let value = std::str::from_utf8(&value_buffer).unwrap();
+                Some(Entry::Assignment { key: key.to_owned(), value: value.to_owned() })
+            },
+            Some(EntryIndicator::Tombstone) => {
+                let mut size_bytes = [0; 4];
+                self.file.read_exact(&mut size_bytes).unwrap();
+                let size = u32::from_be_bytes(size_bytes);
+                let mut key_buffer = vec![0; size as usize];
+                self.file.read_exact(&mut key_buffer).unwrap();
+                let key = std::str::from_utf8(&key_buffer).unwrap();
+                Some(Entry::Tombstone { key: key.to_owned() })
+            },
+            None => {
+                let position = self.file.seek(SeekFrom::Current(0)).unwrap();
+                log::warn!("failed to parse indicator {} @ {position}", indicator[0]);
+                None
+            },
+        }
+    }
+}
+
+pub enum Entry {
+    /// A key-value assignment.
+    Assignment { key: String, value: String },
+    /// A marker that a key is now deleted.
+    Tombstone { key: String },
+}
+
+impl Entry {
+    /// An entry has a key whether it is an assignment or tombstone, this is a
+    /// helper method to extract that without having to pattern match at the
+    /// call site.
+    fn key(&self) -> &String {
+        match self {
+            Self::Assignment { key, .. } => &key,
+            Self::Tombstone { key } => &key,
+        }
+    }
+
+    // TODO: Should this be usize?
+    fn stride(&self) -> usize {
+        match self {
+            Self::Assignment { key, value } => {
+                key.as_bytes().len() + value.as_bytes().len() + 8 + 1
+            },
+            Self::Tombstone { key } => key.as_bytes().len() + 4 + 1,
+        }
+    }
+}
+
+#[repr(u8)]
+enum EntryIndicator {
+    /// The data represents a key-value assignment.
+    Assignment = 0,
+    /// The data represents a key deletion.
+    Tombstone,
+}
+
+impl EntryIndicator {
+    /// Return the [`Indicator`] variant for a `u8`, if any.
+    fn from_u8_opt(num: u8) -> Option<Self> {
+        match num {
+            0 => Some(Self::Assignment),
+            1 => Some(Self::Tombstone),
+            _ => None,
+        }
     }
 }
 
@@ -148,7 +226,10 @@ pub fn write(file: &mut File, key: &str, value: &str) -> Result<(), WriteError> 
     let value_bytes = value.as_bytes();
 
     // Add 8 bytes here for the two u32 length prefixes.
-    let mut bytes = Vec::with_capacity(key_bytes.len() + value_bytes.len() + 8);
+    // TODO: Is it wise to pre-allocate this if our key or value might be too long?
+    // We should do that check earlier...
+    let mut bytes = Vec::with_capacity(key_bytes.len() + value_bytes.len() + 8 + 1);
+    bytes.extend([EntryIndicator::Assignment as u8]);
 
     for (component_bytes, component) in
         [(key_bytes, PairComponent::Key), (value_bytes, PairComponent::Value)]
@@ -159,6 +240,23 @@ pub fn write(file: &mut File, key: &str, value: &str) -> Result<(), WriteError> 
         bytes.extend(size.to_be_bytes());
         bytes.extend(component_bytes);
     }
+
+    file.write_all(&bytes)?;
+    Ok(())
+}
+
+/// Write a deletion marker (tombstone) to a data file in the custom binary
+/// format.
+pub fn tombstone(file: &mut File, key: &str) -> Result<(), WriteError> {
+    let key_bytes = key.as_bytes();
+    let size = key_bytes.len();
+    let size = u32::try_from(size)
+        .map_err(|_| WriteError::TooLarge(PairComponent::Key, size, u32::max_value() as usize))?;
+
+    let mut bytes = Vec::with_capacity(size as usize + 4 + 1);
+    bytes.extend([EntryIndicator::Tombstone as u8]);
+    bytes.extend(size.to_be_bytes());
+    bytes.extend(key_bytes);
 
     file.write_all(&bytes)?;
     Ok(())

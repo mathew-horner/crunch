@@ -2,8 +2,10 @@ use std::collections::{btree_map, BTreeMap};
 
 use crate::env::parse_env;
 
+type Value = Option<String>;
+
 pub struct Memtable {
-    tree: BTreeMap<String, String>,
+    tree: BTreeMap<String, Value>,
     capacity: usize,
 }
 
@@ -35,21 +37,25 @@ impl Memtable {
 
     /// Set `key` to `value` in memory.
     pub fn set(&mut self, key: impl Into<String>, value: impl Into<String>) {
-        self.tree.insert(key.into(), value.into());
+        self.tree.insert(key.into(), Some(value.into()));
     }
 
     /// Get the value for `key` in memory, if any.
-    pub fn get(&self, key: &str) -> Option<String> {
-        // TODO: Don't re-allocate the key here.
+    pub fn get(&self, key: &str) -> Option<Value> {
         self.tree
             .get(key)
-            .inspect(|_| log::trace!("found {key} in memtable"))
+            .inspect(|value| {
+                match value {
+                    Some(_) => log::trace!("found {key} in memtable"),
+                    None => log::trace!("found tombstone for {key} in memtable"),
+                };
+            })
             .map(ToOwned::to_owned)
     }
 
     /// Delete the `key` from memory.
     pub fn delete(&mut self, key: &str) {
-        self.tree.remove(key);
+        self.tree.insert(key.into(), None);
     }
 
     /// Return whether the memtable has reached its configured `capacity`.
@@ -58,7 +64,7 @@ impl Memtable {
     }
 
     /// Return an iterator over the key:value pairs in memory.
-    pub fn iter(&self) -> btree_map::Iter<String, String> {
+    pub fn iter(&self) -> btree_map::Iter<String, Value> {
         self.tree.iter()
     }
 
