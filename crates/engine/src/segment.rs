@@ -39,14 +39,14 @@ impl Segment {
             return None;
         }
 
-        let range = self.sparse_index.get_byte_range(key);
-        let start = range.start.unwrap_or(0);
+        let (start, end) = self.sparse_index.get_byte_range(key);
+        let start = start.unwrap_or(0);
         self.file.seek(SeekFrom::Start(start)).unwrap();
-        log::trace!("byte range constrained to {range:?}");
+        log::trace!("byte range constrained to {start}..{end:?}");
 
         let mut elapsed_bytes = start;
         for entry in EntryIter::new(&mut self.file) {
-            if range.end.is_some() && elapsed_bytes >= range.end.unwrap() {
+            if end.is_some() && elapsed_bytes >= end.unwrap() {
                 break;
             }
             match entry {
