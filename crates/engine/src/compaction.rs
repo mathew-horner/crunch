@@ -4,7 +4,7 @@ use std::io::prelude::*;
 use std::io::{BufReader, SeekFrom};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -14,7 +14,7 @@ use crate::util::Assignment;
 pub struct CompactionParams {
     pub interval_seconds: u64,
     pub path: PathBuf,
-    pub segments: Arc<Mutex<Vec<Segment>>>,
+    pub segments: Arc<RwLock<Vec<Segment>>>,
     pub compaction_kill_flag: Arc<AtomicBool>,
 }
 
@@ -25,27 +25,18 @@ pub fn compaction_loop(
         let mut last_compaction = Instant::now();
         while !compaction_kill_flag.load(Ordering::Relaxed) {
             if last_compaction.elapsed().as_secs() >= interval_seconds {
-                // TODO: It's really bad that we lock the segment files here. This will make our
-                // database completely unavailable to incoming read and write requests while a
-                // compaction is taking place. Which is completely unnecessary since the
-                // compaction is not modifying the existing segment files.
-                let mut segments = segments.lock().unwrap();
-
-                if segments.len() >= 2 {
+                if segments.read().unwrap().len() >= 2 {
                     log::debug!("starting compaction");
-                    let new_segment_file;
+                    let mut segments = segments.write().unwrap();
                     let new_segment_path = path.clone().join("new-segment.dat");
-                    {
-                        let (a, b) = segments.split_at_mut(1);
-                        let first = &mut a[0];
-                        let second = &mut b[0];
-
-                        new_segment_file = Some(do_compaction(
-                            &mut first.file,
-                            &mut second.file,
-                            new_segment_path.clone(),
-                        ));
-                    }
+                    let (a, b) = segments.split_at_mut(1);
+                    let first = &mut a[0];
+                    let second = &mut b[0];
+                    let new_segment_file = Some(do_compaction(
+                        &mut first.file,
+                        &mut second.file,
+                        new_segment_path.clone(),
+                    ));
 
                     fs::remove_file(&segments[0].path).unwrap();
                     fs::remove_file(&segments[1].path).unwrap();
@@ -124,7 +115,7 @@ mod test {
 
     #[test]
     fn compaction() {
-        env_logger::init();
+        _ = env_logger::try_init();
         let mut fixture = StoreFixture::init("./test-db-compaction");
         let mut file1 = fixture.create_segment_file("a=1\nc=3\ne=5");
         let mut file2 = fixture.create_segment_file("b=2\nd=4\nf=6");

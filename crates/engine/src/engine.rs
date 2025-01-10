@@ -83,7 +83,7 @@ mod test {
     fn sledgehammer() {
         const DIR: &str = "sledgehammer";
 
-        env_logger::init();
+        _ = env_logger::try_init();
         let keys: Vec<_> = (0..26).map(|n| char::from_u32(n + 97).unwrap().to_string()).collect();
         let mut map = HashMap::new();
 

@@ -1,7 +1,7 @@
 use std::fs::{create_dir_all, remove_file, File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 use std::thread::{self, JoinHandle};
 
 use walkdir::WalkDir;
@@ -13,7 +13,7 @@ use crate::segment::{self, Entry, EntryIter, Segment};
 
 pub struct Store {
     path: PathBuf,
-    segments: Arc<Mutex<Vec<Segment>>>,
+    segments: Arc<RwLock<Vec<Segment>>>,
     wal: Wal,
 
     /// Flipping this flag to `true` will kill the compactor.
@@ -53,7 +53,7 @@ impl Store {
         let wal = Wal::new(path.clone());
         let mut store = Self {
             path,
-            segments: Arc::new(Mutex::new(segments)),
+            segments: Arc::new(RwLock::new(segments)),
             wal,
             compaction_kill_flag: Arc::new(AtomicBool::new(false)),
             compaction_join_handle: None,
@@ -72,7 +72,8 @@ impl Store {
 
     /// Read the value for `key` from disk, if any.
     pub fn get(&mut self, key: &str) -> Option<String> {
-        let mut segments = self.segments.lock().unwrap();
+        // TODO: This shouldn't hold a write lock.
+        let mut segments = self.segments.write().unwrap();
         for segment in segments.iter_mut().rev() {
             match segment.get(key) {
                 Some(value) => return value,
@@ -93,12 +94,11 @@ impl Store {
 
     /// Write the contents of the `memtable` to a new segment file on disk.
     pub fn write_memtable(&mut self, memtable: &Memtable) {
-        let mut files = self.segments.lock().unwrap();
         let path = self.path.clone().join(
             // TODO: This should be based on the segment file with the highest number + 1, not the
             // length. This is because we compact files now so segment_files.len()
             // won't always be equal to the highest numbered segment file.
-            format!("segment-{}.dat", files.len() + 1),
+            format!("segment-{}.dat", self.segments.read().unwrap().len() + 1),
         );
         let mut file = File::create(path.clone()).unwrap();
         for (key, value) in memtable.iter() {
@@ -108,8 +108,7 @@ impl Store {
             }
         }
         log::debug!("wrote memtable to {path:?}");
-        files.push(Segment::new(File::open(path.clone()).unwrap(), path));
-        drop(files);
+        self.segments.write().unwrap().push(Segment::new(File::open(path.clone()).unwrap(), path));
         self.wal.clear();
     }
 
@@ -133,7 +132,7 @@ impl Store {
     /// Print details about the inner state of the segment file, if it exists.
     pub fn inspect_segment(&self, filename: &str) {
         let path = self.path.join(filename);
-        let guard = self.segments.lock().unwrap();
+        let guard = self.segments.read().unwrap();
         let Some(segment) = guard.iter().find(|segment| segment.path == path) else {
             println!("Error: segment not found");
             return;
