@@ -22,6 +22,11 @@ pub struct Segment {
 }
 
 impl Segment {
+    pub fn open(path: PathBuf) -> Self {
+        let file = File::open(&path).unwrap();
+        Self::new(file, path)
+    }
+
     pub fn new(mut file: File, path: PathBuf) -> Self {
         let (bloom_filter, sparse_index) = create_data_structures_for_segment(&mut file, &path);
         Self { file, path, bloom_filter, sparse_index }
@@ -65,18 +70,6 @@ impl Segment {
 
         log::trace!("{key} was not in {:?}", self.path);
         None
-    }
-
-    /// Read the entirety of the file to a string.
-    ///
-    /// This method is used for automated tests.
-    #[cfg(test)]
-    pub fn read_to_string(&mut self) -> String {
-        self.file.seek(SeekFrom::Start(0)).unwrap();
-        let mut buffer = String::new();
-        self.file.read_to_string(&mut buffer).unwrap();
-        self.file.seek(SeekFrom::Start(0)).unwrap();
-        buffer
     }
 
     /// Print details about the inner state of the segment file and its
@@ -172,6 +165,7 @@ impl Iterator for EntryIter<'_> {
     }
 }
 
+#[derive(Debug, Eq, PartialEq)]
 pub enum Entry {
     /// A key-value assignment.
     Assignment { key: String, value: String },
@@ -183,10 +177,17 @@ impl Entry {
     /// An entry has a key whether it is an assignment or tombstone, this is a
     /// helper method to extract that without having to pattern match at the
     /// call site.
-    fn key(&self) -> &String {
+    pub fn key(&self) -> &String {
         match self {
             Self::Assignment { key, .. } => &key,
             Self::Tombstone { key } => &key,
+        }
+    }
+
+    pub fn write(&self, file: &mut File) -> Result<(), WriteError> {
+        match self {
+            Self::Assignment { key, value } => write(file, key, value),
+            Self::Tombstone { key } => tombstone(file, key),
         }
     }
 

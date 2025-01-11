@@ -90,14 +90,14 @@ mod test {
         _ = remove_dir_all(DIR);
         let mut engine = Engine::new(PathBuf::from(DIR), EngineArgs {
             memtable: MemtableArgs { capacity: 10 },
-            ..Default::default()
+            store: StoreArgs { compaction_enabled: true, compaction_interval_seconds: 0 },
         });
 
         let mut deletes = 0;
         let mut inserts = 0;
         let mut reads = 0;
 
-        for _ in 0..1_000 {
+        for _ in 0..200 {
             match rand::thread_rng().gen_range(0..=2) {
                 0 => {
                     // Random deletion
@@ -131,6 +131,21 @@ mod test {
         }
 
         log::info!("sledgehammer: deletes={deletes} inserts={inserts} reads={reads}");
+        log::info!("sledgehammer: waiting for compactor to finish...");
+
+        while std::fs::read_dir(DIR)
+            .unwrap()
+            .filter(|entry| {
+                entry.as_ref().unwrap().file_name().to_str().unwrap().starts_with("segment")
+            })
+            .count()
+            > 2
+        {}
+
+        for (key, value) in map {
+            assert_eq!(engine.get(key).unwrap(), value);
+        }
+
         remove_dir_all(DIR).unwrap();
     }
 }

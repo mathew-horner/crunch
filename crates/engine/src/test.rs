@@ -1,5 +1,4 @@
 use std::fs::{create_dir, remove_dir_all, File};
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 /// Manages disk resources such as segment files in automated tests.
@@ -17,10 +16,15 @@ impl StoreFixture {
     }
 
     /// Create a new segment file on disk with the given file `contents`.
-    pub fn create_segment_file(&mut self, contents: &str) -> File {
+    pub fn create_segment_file(
+        &mut self,
+        pairs: impl IntoIterator<Item = (&'static str, &'static str)>,
+    ) -> File {
         let path = self.allocate_segment_file();
         let mut file = File::create_new(path).unwrap();
-        file.write_all(contents.as_bytes()).unwrap();
+        pairs
+            .into_iter()
+            .for_each(|(key, value)| crate::segment::write(&mut file, key, value).unwrap());
         file
     }
 

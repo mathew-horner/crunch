@@ -3,4 +3,3 @@
 - Memtable flush in background thread, swap to new memtable to keep serving traffic.
 - De-duplicate code that handles Entry stride size.
 - Rename SS Table code appropriately.
-- Don't keep handles to all segment files open at all times...

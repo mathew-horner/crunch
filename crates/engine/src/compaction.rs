@@ -1,20 +1,17 @@
 use std::cmp;
 use std::fs::{self, File, OpenOptions};
-use std::io::prelude::*;
-use std::io::{BufReader, SeekFrom};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use crate::segment::Segment;
-use crate::util::Assignment;
+use crate::segment::EntryIter;
 
 pub struct CompactionParams {
     pub interval_seconds: u64,
     pub path: PathBuf,
-    pub segments: Arc<RwLock<Vec<Segment>>>,
+    pub segments: Arc<RwLock<Vec<PathBuf>>>,
     pub compaction_kill_flag: Arc<AtomicBool>,
 }
 
@@ -25,24 +22,25 @@ pub fn compaction_loop(
         let mut last_compaction = Instant::now();
         while !compaction_kill_flag.load(Ordering::Relaxed) {
             if last_compaction.elapsed().as_secs() >= interval_seconds {
-                if segments.read().unwrap().len() >= 2 {
-                    log::debug!("starting compaction");
-                    let mut segments = segments.write().unwrap();
+                let segments_read = segments.read().unwrap();
+                if segments_read.len() >= 2 {
+                    let (a, b) = segments_read.split_at(1);
+                    let first = &a[0];
+                    let second = &b[0];
+                    log::debug!("starting compaction of {first:?} and {second:?}");
                     let new_segment_path = path.clone().join("new-segment.dat");
-                    let (a, b) = segments.split_at_mut(1);
-                    let first = &mut a[0];
-                    let second = &mut b[0];
-                    let new_segment_file = Some(do_compaction(
-                        &mut first.file,
-                        &mut second.file,
-                        new_segment_path.clone(),
-                    ));
+                    let mut first = File::open(&a[0]).unwrap();
+                    let mut second = File::open(&b[0]).unwrap();
+                    do_compaction(&mut first, &mut second, new_segment_path.clone());
+                    drop(segments_read);
 
-                    fs::remove_file(&segments[0].path).unwrap();
-                    fs::remove_file(&segments[1].path).unwrap();
-                    fs::rename(new_segment_path, segments[1].path.clone()).unwrap();
+                    let mut segments_write = segments.write().unwrap();
+                    fs::remove_file(&segments_write[0]).unwrap();
+                    fs::remove_file(&segments_write[1]).unwrap();
+                    fs::rename(&new_segment_path, &segments_write[1]).unwrap();
+                    // TODO: This should be a VecDeque so we can do this in constant time.
+                    segments_write.remove(0);
 
-                    segments.splice(0..2, [new_segment_file.unwrap()]);
                     log::debug!("compaction finished");
                 } else {
                     log::debug!("compaction loop ticked, but there was nothing to do");
@@ -54,72 +52,76 @@ pub fn compaction_loop(
     })
 }
 
-fn do_compaction(first: &mut File, second: &mut File, path: PathBuf) -> Segment {
-    let mut new_segment_file =
+fn do_compaction(first: &mut File, second: &mut File, path: PathBuf) {
+    let mut new_segment =
         OpenOptions::new().create_new(true).write(true).read(true).open(&path).unwrap();
 
-    first.seek(SeekFrom::Start(0)).unwrap();
-    second.seek(SeekFrom::Start(0)).unwrap();
-    log::trace!("reset segment file offsets");
+    let mut first_iter = EntryIter::from_start(first).peekable();
+    let mut second_iter = EntryIter::from_start(second).peekable();
 
-    let mut first_iter = BufReader::new(first).lines().into_iter().peekable();
-    let mut second_iter = BufReader::new(second).lines().into_iter().peekable();
-
-    while first_iter.peek().is_some() && second_iter.peek().is_some() {
-        let first_line: String = first_iter.peek().unwrap().as_ref().unwrap().into();
-        let second_line: String = second_iter.peek().unwrap().as_ref().unwrap().into();
-
-        let first_assignment = Assignment::parse(first_line.as_str()).unwrap();
-        let second_assignment = Assignment::parse(second_line.as_str()).unwrap();
-        log::trace!("stitching {first_line} vs {second_line}");
-
-        match first_assignment.key.cmp(&second_assignment.key) {
+    while let (Some(first_entry), Some(second_entry)) = (first_iter.peek(), second_iter.peek()) {
+        // TODO: Don't unwrap these...
+        match first_entry.key().cmp(&second_entry.key()) {
             cmp::Ordering::Less => {
-                log::trace!("left ({first_line}) -> segment file");
-                new_segment_file.write(first_line.as_bytes()).unwrap();
+                log::trace!("first ({first_entry:?}) -> {path:?}");
+                first_entry.write(&mut new_segment).unwrap();
                 first_iter.next();
             },
             cmp::Ordering::Greater => {
-                log::trace!("right ({second_line}) -> segment file");
-                new_segment_file.write(second_line.as_bytes()).unwrap();
+                log::trace!("second ({second_entry:?}) -> {path:?}");
+                second_entry.write(&mut new_segment).unwrap();
                 second_iter.next();
             },
             cmp::Ordering::Equal => {
-                log::trace!("equivalent keys; deduplicating and writing to segment file");
-                new_segment_file.write(second_line.as_bytes()).unwrap();
+                log::trace!("equal, dedupe ({second_entry:?}) -> {path:?}");
+                second_entry.write(&mut new_segment).unwrap();
                 first_iter.next();
                 second_iter.next();
             },
-        };
-
-        new_segment_file.write("\n".as_bytes()).unwrap();
+        }
     }
 
-    while let Some(Ok(line)) = first_iter.next() {
-        log::trace!("left ({line}) -> segment file");
-        new_segment_file.write(format!("{}\n", line).as_bytes()).unwrap();
+    while let Some(entry) = first_iter.next() {
+        log::trace!("first ({entry:?}) -> {path:?}");
+        entry.write(&mut new_segment).unwrap();
     }
 
-    while let Some(Ok(line)) = second_iter.next() {
-        log::trace!("right ({line}) -> segment file");
-        new_segment_file.write(format!("{}\n", line).as_bytes()).unwrap();
+    while let Some(entry) = second_iter.next() {
+        log::trace!("second ({entry:?}) -> {path:?}");
+        entry.write(&mut new_segment).unwrap();
     }
-
-    Segment::new(new_segment_file, path)
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::segment::Entry;
     use crate::test::StoreFixture;
 
     #[test]
     fn compaction() {
         _ = env_logger::try_init();
         let mut fixture = StoreFixture::init("./test-db-compaction");
-        let mut file1 = fixture.create_segment_file("a=1\nc=3\ne=5");
-        let mut file2 = fixture.create_segment_file("b=2\nd=4\nf=6");
-        let mut segment = do_compaction(&mut file1, &mut file2, fixture.allocate_segment_file());
-        assert_eq!(segment.read_to_string(), "a=1\nb=2\nc=3\nd=4\ne=5\nf=6\n");
+        let mut file1 = fixture.create_segment_file([("a", "1"), ("c", "3"), ("e", "5")]);
+        let mut file2 = fixture.create_segment_file([("b", "2"), ("d", "4"), ("f", "6")]);
+        let mut file3 = fixture.create_segment_file([("a", "7"), ("d", "9"), ("e", "8")]);
+
+        let new1 = fixture.allocate_segment_file();
+        do_compaction(&mut file1, &mut file2, new1.clone());
+        let mut new1 = File::open(new1).unwrap();
+
+        let new2 = fixture.allocate_segment_file();
+        do_compaction(&mut new1, &mut file3, new2.clone());
+        let mut new2 = File::open(new2).unwrap();
+
+        pretty_assertions::assert_eq!(
+            EntryIter::new(&mut new2).collect::<Vec<_>>(),
+            [("a", "7"), ("b", "2"), ("c", "3"), ("d", "9"), ("e", "8"), ("f", "6")]
+                .into_iter()
+                .map(|(key, value)| {
+                    Entry::Assignment { key: key.to_owned(), value: value.to_owned() }
+                })
+                .collect::<Vec<_>>()
+        );
     }
 }

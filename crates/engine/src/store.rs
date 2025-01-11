@@ -13,7 +13,7 @@ use crate::segment::{self, Entry, EntryIter, Segment};
 
 pub struct Store {
     path: PathBuf,
-    segments: Arc<RwLock<Vec<Segment>>>,
+    segments: Arc<RwLock<Vec<PathBuf>>>,
     wal: Wal,
 
     /// Flipping this flag to `true` will kill the compactor.
@@ -72,9 +72,9 @@ impl Store {
 
     /// Read the value for `key` from disk, if any.
     pub fn get(&mut self, key: &str) -> Option<String> {
-        // TODO: This shouldn't hold a write lock.
-        let mut segments = self.segments.write().unwrap();
-        for segment in segments.iter_mut().rev() {
+        let segments = self.segments.read().unwrap();
+        for segment in segments.iter().rev() {
+            let mut segment = Segment::open(segment.to_owned());
             match segment.get(key) {
                 Some(value) => return value,
                 _ => {},
@@ -108,7 +108,7 @@ impl Store {
             }
         }
         log::debug!("wrote memtable to {path:?}");
-        self.segments.write().unwrap().push(Segment::new(File::open(path.clone()).unwrap(), path));
+        self.segments.write().unwrap().push(path);
         self.wal.clear();
     }
 
@@ -133,18 +133,18 @@ impl Store {
     pub fn inspect_segment(&self, filename: &str) {
         let path = self.path.join(filename);
         let guard = self.segments.read().unwrap();
-        let Some(segment) = guard.iter().find(|segment| segment.path == path) else {
+        let Some(segment) = guard.iter().find(|segment| **segment == path) else {
             println!("Error: segment not found");
             return;
         };
-        segment.inspect();
+        Segment::open(segment.to_owned()).inspect();
     }
 }
 
 /// Creates a store directory at the given `path` if one does not already exist.
 ///
 /// If one does, it returns the existing segment files to seed the [`Store`].
-fn initialize_store_at_path(path: &PathBuf) -> Vec<Segment> {
+fn initialize_store_at_path(path: &PathBuf) -> Vec<PathBuf> {
     let mut files = Vec::new();
     if !path.exists() {
         log::info!("no store detected at {path:?}, creating directory");
@@ -157,8 +157,7 @@ fn initialize_store_at_path(path: &PathBuf) -> Vec<Segment> {
             let filename = entry.file_name().to_string_lossy();
             // TODO: This is not a great way to detect / filter out non-segment files.
             if filename.starts_with("segment") {
-                let file = File::open(entry.path()).unwrap();
-                files.push(Segment::new(file, PathBuf::from(entry.path())));
+                files.push(PathBuf::from(entry.path()));
             }
         }
     }
