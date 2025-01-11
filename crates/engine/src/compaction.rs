@@ -1,4 +1,5 @@
 use std::cmp;
+use std::collections::VecDeque;
 use std::fs::{self, File, OpenOptions};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -11,7 +12,7 @@ use crate::segment::EntryIter;
 pub fn compaction_loop(
     interval_seconds: u64,
     path: PathBuf,
-    segments: Arc<RwLock<Vec<PathBuf>>>,
+    segments: Arc<RwLock<VecDeque<PathBuf>>>,
     compaction_kill_flag: Arc<AtomicBool>,
 ) -> JoinHandle<()> {
     thread::spawn(move || {
@@ -20,13 +21,12 @@ pub fn compaction_loop(
             if last_compaction.elapsed().as_secs() >= interval_seconds {
                 let segments_read = segments.read().unwrap();
                 if segments_read.len() >= 2 {
-                    let (a, b) = segments_read.split_at(1);
-                    let first = &a[0];
-                    let second = &b[0];
+                    let first = &segments_read[0];
+                    let second = &segments_read[1];
                     log::debug!("starting compaction of {first:?} and {second:?}");
+                    let mut first = File::open(first).unwrap();
+                    let mut second = File::open(second).unwrap();
                     let new_segment_path = path.clone().join("new-segment.dat");
-                    let mut first = File::open(&a[0]).unwrap();
-                    let mut second = File::open(&b[0]).unwrap();
                     compact(&mut first, &mut second, new_segment_path.clone());
                     drop(segments_read);
 
@@ -34,8 +34,7 @@ pub fn compaction_loop(
                     fs::remove_file(&segments_write[0]).unwrap();
                     fs::remove_file(&segments_write[1]).unwrap();
                     fs::rename(&new_segment_path, &segments_write[1]).unwrap();
-                    // TODO: This should be a VecDeque so we can do this in constant time.
-                    segments_write.remove(0);
+                    segments_write.pop_front();
 
                     log::debug!("compaction finished");
                 } else {

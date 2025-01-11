@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::fs::{create_dir_all, remove_file, File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -13,7 +14,7 @@ use crate::segment::{self, segment_file_number, Entry, EntryIter, SegmentHandle}
 
 pub struct Store {
     path: PathBuf,
-    segments: Arc<RwLock<Vec<PathBuf>>>,
+    segments: Arc<RwLock<VecDeque<PathBuf>>>,
     wal: Wal,
 
     /// Flipping this flag to `true` will kill the compactor.
@@ -105,7 +106,7 @@ impl Store {
             }
         }
         log::debug!("wrote memtable to {path:?}");
-        self.segments.write().unwrap().push(path);
+        self.segments.write().unwrap().push_back(path);
         self.wal.clear();
     }
 
@@ -141,8 +142,8 @@ impl Store {
 /// Creates a store directory at the given `path` if one does not already exist.
 ///
 /// If one does, it returns the existing segment files to seed the [`Store`].
-fn initialize_store_at_path(path: &PathBuf) -> Vec<PathBuf> {
-    let mut files = Vec::new();
+fn initialize_store_at_path(path: &PathBuf) -> VecDeque<PathBuf> {
+    let mut files = VecDeque::new();
     if !path.exists() {
         log::info!("no store detected at {path:?}, creating directory");
         create_dir_all(path).unwrap();
@@ -154,7 +155,7 @@ fn initialize_store_at_path(path: &PathBuf) -> Vec<PathBuf> {
             let filename = entry.file_name().to_string_lossy();
             // TODO: This is not a great way to detect / filter out non-segment files.
             if filename.starts_with("segment") {
-                files.push(PathBuf::from(entry.path()));
+                files.push_back(PathBuf::from(entry.path()));
             }
         }
     }
