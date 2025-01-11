@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::{self, SeekFrom};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use bloom::BloomFilter;
 
@@ -14,21 +14,32 @@ const SPARSE_INDEX_RANGE_SIZE: usize = 4;
 
 type Value = Option<String>;
 
-pub struct Segment {
-    pub file: File,
-    pub path: PathBuf,
+pub struct SegmentHandle {
+    file: File,
+    path: PathBuf,
     bloom_filter: BloomFilter,
     sparse_index: SparseIndex,
 }
 
-impl Segment {
+impl SegmentHandle {
+    /// Open the segment file at the given path and initialize the associated
+    /// data structures for lookups.
     pub fn open(path: PathBuf) -> Self {
-        let file = File::open(&path).unwrap();
-        Self::new(file, path)
-    }
+        let mut file = File::open(&path).unwrap();
+        let size = EntryIter::from_start(&mut file).count() as u32;
+        log::trace!("size of {path:?}: {size}");
+        let mut bloom_filter = BloomFilter::with_rate(BLOOM_FILTER_FALSE_POSITIVE_RATE, size);
+        let mut sparse_index = SparseIndex::new();
+        let mut elapsed_bytes = 0;
 
-    pub fn new(mut file: File, path: PathBuf) -> Self {
-        let (bloom_filter, sparse_index) = create_data_structures_for_segment(&mut file, &path);
+        for (idx, entry) in EntryIter::from_start(&mut file).enumerate() {
+            bloom_filter.insert(entry.key());
+            if idx % SPARSE_INDEX_RANGE_SIZE == 0 {
+                sparse_index.insert(entry.key(), elapsed_bytes);
+            }
+            elapsed_bytes += entry.stride() as u64;
+        }
+
         Self { file, path, bloom_filter, sparse_index }
     }
 
@@ -78,27 +89,6 @@ impl Segment {
         println!("Sparse Index");
         self.sparse_index.inner().iter().for_each(|(key, offset)| println!("{key} @ {offset}"));
     }
-}
-
-fn create_data_structures_for_segment(
-    file: &mut File,
-    path: &PathBuf,
-) -> (BloomFilter, SparseIndex) {
-    let size = EntryIter::from_start(file).count() as u32;
-    log::trace!("size of {path:?}: {size}");
-    let mut bloom_filter = BloomFilter::with_rate(BLOOM_FILTER_FALSE_POSITIVE_RATE, size);
-    let mut sparse_index = SparseIndex::new();
-    let mut elapsed_bytes = 0;
-
-    for (idx, entry) in EntryIter::from_start(file).enumerate() {
-        bloom_filter.insert(entry.key());
-        if idx % SPARSE_INDEX_RANGE_SIZE == 0 {
-            sparse_index.insert(entry.key(), elapsed_bytes);
-        }
-        elapsed_bytes += entry.stride() as u64;
-    }
-
-    (bloom_filter, sparse_index)
 }
 
 /// Iterates over the entries in a segment file.
@@ -261,4 +251,17 @@ pub fn tombstone(file: &mut File, key: &str) -> Result<(), WriteError> {
 
     file.write_all(&bytes)?;
     Ok(())
+}
+
+/// Return the number of the given segment file.
+///
+/// Example: `./my-db/segment-12.dat` -> `Some(12)`
+pub fn segment_file_number(path: impl AsRef<Path>) -> Option<u32> {
+    path.as_ref()
+        .file_name()?
+        .to_str()?
+        .strip_prefix("segment-")?
+        .strip_suffix(".dat")?
+        .parse()
+        .ok()
 }

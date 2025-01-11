@@ -73,6 +73,7 @@ impl Engine {
 mod test {
     use std::collections::HashMap;
     use std::fs::remove_dir_all;
+    use std::time::Duration;
 
     use rand::seq::SliceRandom;
     use rand::Rng;
@@ -128,20 +129,25 @@ mod test {
                 },
                 _ => unreachable!(),
             }
+            std::thread::sleep(Duration::from_millis(15));
         }
 
         log::info!("sledgehammer: deletes={deletes} inserts={inserts} reads={reads}");
         log::info!("sledgehammer: waiting for compactor to finish...");
 
+        // Wait until the compactor has worked through all the segment files.
         while std::fs::read_dir(DIR)
             .unwrap()
             .filter(|entry| {
+                // TODO: This should be abstracted into a function to not duplicate the
+                // definition of what a segment file is.
                 entry.as_ref().unwrap().file_name().to_str().unwrap().starts_with("segment")
             })
             .count()
-            > 2
+            >= 2
         {}
 
+        // One final assertion loop to ensure that the compactor worked properly.
         for (key, value) in map {
             assert_eq!(engine.get(key).unwrap(), value);
         }

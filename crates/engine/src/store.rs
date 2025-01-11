@@ -6,10 +6,10 @@ use std::thread::{self, JoinHandle};
 
 use walkdir::WalkDir;
 
-use crate::compaction::{compaction_loop, CompactionParams};
+use crate::compaction::compaction_loop;
 use crate::env::parse_env;
 use crate::memtable::Memtable;
-use crate::segment::{self, Entry, EntryIter, Segment};
+use crate::segment::{self, segment_file_number, Entry, EntryIter, SegmentHandle};
 
 pub struct Store {
     path: PathBuf,
@@ -59,12 +59,12 @@ impl Store {
             compaction_join_handle: None,
         };
         if args.compaction_enabled {
-            store.compaction_join_handle = Some(compaction_loop(CompactionParams {
-                interval_seconds: args.compaction_interval_seconds,
-                path: store.path.clone(),
-                segments: store.segments.clone(),
-                compaction_kill_flag: store.compaction_kill_flag.clone(),
-            }));
+            store.compaction_join_handle = Some(compaction_loop(
+                args.compaction_interval_seconds,
+                store.path.clone(),
+                store.segments.clone(),
+                store.compaction_kill_flag.clone(),
+            ));
         }
         log::debug!("store initialized with {args:?}");
         store
@@ -74,7 +74,7 @@ impl Store {
     pub fn get(&mut self, key: &str) -> Option<String> {
         let segments = self.segments.read().unwrap();
         for segment in segments.iter().rev() {
-            let mut segment = Segment::open(segment.to_owned());
+            let mut segment = SegmentHandle::open(segment.to_owned());
             match segment.get(key) {
                 Some(value) => return value,
                 _ => {},
@@ -94,12 +94,9 @@ impl Store {
 
     /// Write the contents of the `memtable` to a new segment file on disk.
     pub fn write_memtable(&mut self, memtable: &Memtable) {
-        let path = self.path.clone().join(
-            // TODO: This should be based on the segment file with the highest number + 1, not the
-            // length. This is because we compact files now so segment_files.len()
-            // won't always be equal to the highest numbered segment file.
-            format!("segment-{}.dat", self.segments.read().unwrap().len() + 1),
-        );
+        let last_segment_id: u32 =
+            self.segments.read().unwrap().iter().last().and_then(segment_file_number).unwrap_or(0);
+        let path = self.path.clone().join(format!("segment-{}.dat", last_segment_id + 1));
         let mut file = File::create(path.clone()).unwrap();
         for (key, value) in memtable.iter() {
             match value {
@@ -137,7 +134,7 @@ impl Store {
             println!("Error: segment not found");
             return;
         };
-        Segment::open(segment.to_owned()).inspect();
+        SegmentHandle::open(segment.to_owned()).inspect();
     }
 }
 

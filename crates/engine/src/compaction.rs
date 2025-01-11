@@ -8,15 +8,11 @@ use std::time::{Duration, Instant};
 
 use crate::segment::EntryIter;
 
-pub struct CompactionParams {
-    pub interval_seconds: u64,
-    pub path: PathBuf,
-    pub segments: Arc<RwLock<Vec<PathBuf>>>,
-    pub compaction_kill_flag: Arc<AtomicBool>,
-}
-
 pub fn compaction_loop(
-    CompactionParams { interval_seconds, path, segments, compaction_kill_flag }: CompactionParams,
+    interval_seconds: u64,
+    path: PathBuf,
+    segments: Arc<RwLock<Vec<PathBuf>>>,
+    compaction_kill_flag: Arc<AtomicBool>,
 ) -> JoinHandle<()> {
     thread::spawn(move || {
         let mut last_compaction = Instant::now();
@@ -31,7 +27,7 @@ pub fn compaction_loop(
                     let new_segment_path = path.clone().join("new-segment.dat");
                     let mut first = File::open(&a[0]).unwrap();
                     let mut second = File::open(&b[0]).unwrap();
-                    do_compaction(&mut first, &mut second, new_segment_path.clone());
+                    compact(&mut first, &mut second, new_segment_path.clone());
                     drop(segments_read);
 
                     let mut segments_write = segments.write().unwrap();
@@ -52,7 +48,7 @@ pub fn compaction_loop(
     })
 }
 
-fn do_compaction(first: &mut File, second: &mut File, path: PathBuf) {
+fn compact(first: &mut File, second: &mut File, path: PathBuf) {
     let mut new_segment =
         OpenOptions::new().create_new(true).write(true).read(true).open(&path).unwrap();
 
@@ -107,11 +103,11 @@ mod test {
         let mut file3 = fixture.create_segment_file([("a", "7"), ("d", "9"), ("e", "8")]);
 
         let new1 = fixture.allocate_segment_file();
-        do_compaction(&mut file1, &mut file2, new1.clone());
+        compact(&mut file1, &mut file2, new1.clone());
         let mut new1 = File::open(new1).unwrap();
 
         let new2 = fixture.allocate_segment_file();
-        do_compaction(&mut new1, &mut file3, new2.clone());
+        compact(&mut new1, &mut file3, new2.clone());
         let mut new2 = File::open(new2).unwrap();
 
         pretty_assertions::assert_eq!(
