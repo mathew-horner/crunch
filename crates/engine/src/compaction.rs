@@ -1,11 +1,10 @@
-use std::cmp;
 use std::collections::VecDeque;
 use std::fs::{self, File, OpenOptions};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
-use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
+use std::{cmp, thread};
 
 use crate::segment::EntryIter;
 
@@ -14,37 +13,46 @@ pub fn compaction_loop(
     path: PathBuf,
     segments: Arc<RwLock<VecDeque<PathBuf>>>,
     compaction_kill_flag: Arc<AtomicBool>,
-) -> JoinHandle<()> {
-    thread::spawn(move || {
-        let mut last_compaction = Instant::now();
-        while !compaction_kill_flag.load(Ordering::Relaxed) {
-            if last_compaction.elapsed().as_secs() >= interval_seconds {
-                let segments_read = segments.read().unwrap();
-                if segments_read.len() >= 2 {
-                    let first = &segments_read[0];
-                    let second = &segments_read[1];
-                    log::debug!("starting compaction of {first:?} and {second:?}");
-                    let mut first = File::open(first).unwrap();
-                    let mut second = File::open(second).unwrap();
-                    let new_segment_path = path.clone().join("new-segment.dat");
-                    compact(&mut first, &mut second, new_segment_path.clone());
-                    drop(segments_read);
+) {
+    let mut last_compaction = Instant::now();
+    while !compaction_kill_flag.load(Ordering::Relaxed) {
+        if last_compaction.elapsed().as_secs() >= interval_seconds {
+            let segments_read = segments.read().unwrap();
+            if segments_read.len() >= 2 {
+                let first = &segments_read[0];
+                let second = &segments_read[1];
+                log::debug!("starting compaction of {first:?} and {second:?}");
+                let mut first = File::open(first).unwrap();
+                let mut second = File::open(second).unwrap();
+                let new_segment_path = path.clone().join("new-segment.dat");
+                compact(&mut first, &mut second, new_segment_path.clone());
 
-                    let mut segments_write = segments.write().unwrap();
-                    fs::remove_file(&segments_write[0]).unwrap();
-                    fs::remove_file(&segments_write[1]).unwrap();
-                    fs::rename(&new_segment_path, &segments_write[1]).unwrap();
-                    segments_write.pop_front();
+                // This explicit drop is pivotal to avoid deadlocks, otherwise the write lock
+                // on the following line can not be acquired.
+                drop(segments_read);
 
-                    log::debug!("compaction finished");
-                } else {
-                    log::debug!("compaction loop ticked, but there was nothing to do");
-                }
-                last_compaction = Instant::now();
+                // This separate swaperoo step is so that we only need to hold a *read* lock on
+                // the segment buffer when doing the compaction, and those files can continue to
+                // service read requests on the engine thread.
+                //
+                // TODO: Don't need to acquire a write lock over the whole buffer for this
+                // section. We only need write locks on the two original segment files until the
+                // new one is swapped in. We still need a write lock on the buffer for the final
+                // `pop_front`, but the runtime of that is very short.
+                let mut segments_write = segments.write().unwrap();
+                fs::remove_file(&segments_write[0]).unwrap();
+                fs::remove_file(&segments_write[1]).unwrap();
+                fs::rename(&new_segment_path, &segments_write[1]).unwrap();
+                segments_write.pop_front();
+
+                log::debug!("compaction finished");
+            } else {
+                log::debug!("compaction loop ticked, but there was nothing to do");
             }
-            thread::sleep(Duration::from_secs(1));
+            last_compaction = Instant::now();
         }
-    })
+        thread::sleep(Duration::from_secs(1));
+    }
 }
 
 fn compact(first: &mut File, second: &mut File, path: PathBuf) {

@@ -60,12 +60,19 @@ impl Store {
             compaction_join_handle: None,
         };
         if args.compaction_enabled {
-            store.compaction_join_handle = Some(compaction_loop(
-                args.compaction_interval_seconds,
-                store.path.clone(),
-                store.segments.clone(),
-                store.compaction_kill_flag.clone(),
-            ));
+            store.compaction_join_handle = Some({
+                let path = store.path.clone();
+                let segments = store.segments.clone();
+                let compaction_kill_flag = store.compaction_kill_flag.clone();
+                std::thread::spawn(move || {
+                    compaction_loop(
+                        args.compaction_interval_seconds,
+                        path,
+                        segments,
+                        compaction_kill_flag,
+                    )
+                })
+            });
         }
         log::debug!("store initialized with {args:?}");
         store
