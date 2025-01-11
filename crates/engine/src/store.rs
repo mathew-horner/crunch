@@ -15,7 +15,7 @@ use crate::segment::{self, segment_file_number, Entry, EntryIter, SegmentHandle}
 pub struct Store {
     path: PathBuf,
     segments: Arc<RwLock<VecDeque<PathBuf>>>,
-    wal: Wal,
+    wal: File,
 
     /// Flipping this flag to `true` will kill the compactor.
     compaction_kill_flag: Arc<AtomicBool>,
@@ -47,11 +47,10 @@ impl Default for StoreArgs {
 }
 
 impl Store {
-    /// Initialize a store which will persist its data files at the given `path`
-    /// directory.
+    /// Initialize a store which will persist its data to the given directory.
     pub fn new(path: PathBuf, args: StoreArgs) -> Self {
         let segments = initialize_store_at_path(&path);
-        let wal = Wal::new(path.clone());
+        let wal = open_wal(&path);
         let mut store = Self {
             path,
             segments: Arc::new(RwLock::new(segments)),
@@ -78,6 +77,11 @@ impl Store {
         store
     }
 
+    /// Append an assignment to the WAL.
+    pub fn set(&mut self, key: &str, value: &str) {
+        segment::write(&mut self.wal, key, value).unwrap();
+    }
+
     /// Read the value for `key` from disk, if any.
     pub fn get(&mut self, key: &str) -> Option<String> {
         let segments = self.segments.read().unwrap();
@@ -91,6 +95,11 @@ impl Store {
         None
     }
 
+    /// Append a tombstone to the WAL to indicate that a key should be deleted.
+    pub fn delete(&mut self, key: &str) {
+        segment::tombstone(&mut self.wal, key).unwrap();
+    }
+
     /// Gracefully shutdown the store.
     pub fn stop(self) -> thread::Result<()> {
         self.compaction_kill_flag.swap(true, Ordering::Relaxed);
@@ -102,9 +111,11 @@ impl Store {
 
     /// Write the contents of the `memtable` to a new segment file on disk.
     pub fn write_memtable(&mut self, memtable: &Memtable) {
-        let last_segment_id: u32 =
+        // The id of the new segment file will be the highest one on disk + 1.
+        let last_segment_id =
             self.segments.read().unwrap().iter().last().and_then(segment_file_number).unwrap_or(0);
         let path = self.path.clone().join(format!("segment-{}.dat", last_segment_id + 1));
+
         let mut file = File::create(path.clone()).unwrap();
         for (key, value) in memtable.iter() {
             match value {
@@ -114,24 +125,24 @@ impl Store {
         }
         log::debug!("wrote memtable to {path:?}");
         self.segments.write().unwrap().push_back(path);
-        self.wal.clear();
+
+        // Delete and recreate the WAL, which means that if the engine crashes after the
+        // deletion and before the re-creation, there will be no WAL on disk. Since the
+        // engine expects that it may have to recreate the WAL, and our engine is only
+        // single threaded (outside of compaction, which only touches segment files),
+        // this is fine.
+        remove_file(wal_path(&self.path)).unwrap();
+        self.wal = open_wal(&self.path);
     }
 
-    /// Append a tombstone to the WAL to indicate that a key should be deleted.
-    pub fn tombstone(&mut self, key: &str) {
-        self.wal.tombstone(key);
-    }
-
-    /// Append an assignment to the WAL.
-    pub fn write_ahead(&mut self, key: &str, val: &str) {
-        self.wal.write(key, val);
-    }
-
-    /// Replay the WAL and seed the memtable.
-    ///
-    /// The WAL is an important mechanism for crash recovery, and speedy writes.
-    pub fn replay_wal(&self, memtable: &mut Memtable) {
-        self.wal.replay(memtable);
+    /// Replay the WAL and seed the `memtable`.
+    pub fn replay_wal(&mut self, memtable: &mut Memtable) {
+        EntryIter::from_start(&mut self.wal).for_each(|entry| {
+            match entry {
+                Entry::Assignment { key, value } => memtable.set(key, value),
+                Entry::Tombstone { key } => memtable.delete(&key),
+            };
+        })
     }
 
     /// Print details about the inner state of the segment file, if it exists.
@@ -167,53 +178,6 @@ fn initialize_store_at_path(path: &PathBuf) -> VecDeque<PathBuf> {
         }
     }
     files
-}
-
-struct Wal {
-    file: File,
-    store_path: PathBuf,
-}
-
-impl Wal {
-    fn new(store_path: PathBuf) -> Self {
-        Self { file: open_wal(&store_path), store_path }
-    }
-
-    /// Clear the WAL; meant to be called during checkpoints.
-    ///
-    /// This function deletes and recreates the WAL, which means that if the
-    /// engine crashes after the deletion and before the re-creation, there
-    /// will be no WAL on disk. Since the engine expects that it may have to
-    /// recreate the WAL, and our engine is only single threaded
-    /// (outside of compaction, which only touches segment files), this is fine.
-    fn clear(&mut self) {
-        remove_file(self.path()).unwrap();
-        self.file = open_wal(&self.store_path);
-    }
-
-    fn write(&mut self, key: &str, value: &str) {
-        // TODO: Don't unwrap.
-        segment::write(&mut self.file, key, value).unwrap();
-    }
-
-    fn tombstone(&mut self, key: &str) {
-        // TODO: Don't unwrap.
-        segment::tombstone(&mut self.file, key).unwrap();
-    }
-
-    fn replay(&self, memtable: &mut Memtable) {
-        let mut file = File::open(self.path()).unwrap();
-        EntryIter::from_start(&mut file).for_each(|entry| {
-            match entry {
-                Entry::Assignment { key, value } => memtable.set(key, value),
-                Entry::Tombstone { key } => memtable.delete(&key),
-            };
-        })
-    }
-
-    fn path(&self) -> PathBuf {
-        wal_path(&self.store_path)
-    }
 }
 
 /// Return the path to the WAL file in the given store.
