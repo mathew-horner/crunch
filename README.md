@@ -19,9 +19,9 @@ These type placeholders are used throughout the environment variable table:
 
 |Variable Name|Description|Accepted Value(s)|
 |-|-|-|
-|`CRUNCH_MEMTABLE__CAPACITY`|The number of key-value pairs that the memtable can hold before it flushes to disk|`<number>`|
-|`CRUNCH_STORE__COMPACTION_ENABLED`|Whether the background thread to perform compaction should run.|`<bool>`|
-|`CRUNCH_STORE__COMPACTION_INTERVAL_SECONDS`|The number of seconds between compaction runs.|`<number>`|
+|`CRUNCH_ENGINE_MEMTABLE__CAPACITY`|The number of key-value pairs that the memtable can hold before it flushes to disk|`<number>`|
+|`CRUNCH_ENGINE_STORE__COMPACTION_ENABLED`|Whether the background thread to perform compaction should run.|`<bool>`|
+|`CRUNCH_ENGINE_STORE__COMPACTION_INTERVAL_SECONDS`|The number of seconds between compaction runs.|`<number>`|
 
 ## Usage
 

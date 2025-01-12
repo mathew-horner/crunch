@@ -6,8 +6,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread::{self, JoinHandle};
 
+use crunch_common::env::parse_env;
+
 use crate::compaction::compaction_loop;
-use crate::env::parse_env;
 use crate::error::Error;
 use crate::memtable::Memtable;
 use crate::segment::{
@@ -31,8 +32,9 @@ pub struct StoreArgs {
 
 impl StoreArgs {
     pub fn from_env() -> Self {
-        let compaction_enabled = parse_env("store", "compaction_enabled", true);
-        let compaction_interval_seconds = parse_env("store", "compaction_interval_seconds", 600);
+        let compaction_enabled = parse_env("engine", Some("store"), "compaction_enabled", true);
+        let compaction_interval_seconds =
+            parse_env("engine", Some("store"), "compaction_interval_seconds", 600);
         Self { compaction_enabled, compaction_interval_seconds }
     }
 }
@@ -77,7 +79,7 @@ impl Store {
         segment::write(&mut self.wal, key, value)
     }
 
-    pub fn get(&mut self, key: &str) -> Result<Option<String>, Error> {
+    pub fn get(&self, key: &str) -> Result<Option<String>, Error> {
         let segments = self.segments.read()?;
         for segment in segments.iter().rev() {
             let mut segment = SegmentHandle::open(segment.to_owned())?;

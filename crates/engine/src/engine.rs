@@ -16,8 +16,18 @@ pub struct EngineArgs {
     pub store: StoreArgs,
 }
 
+impl EngineArgs {
+    pub fn from_env() -> Self {
+        Self { memtable: MemtableArgs::from_env(), store: StoreArgs::from_env() }
+    }
+}
+
 impl Engine {
-    pub fn new(path: PathBuf, args: EngineArgs) -> Result<Self, Error> {
+    pub fn new(path: PathBuf) -> Result<Self, Error> {
+        Self::with_args(path, EngineArgs::from_env())
+    }
+
+    pub fn with_args(path: PathBuf, args: EngineArgs) -> Result<Self, Error> {
         let mut memtable = Memtable::new(args.memtable);
         let mut store = Store::new(path, args.store)?;
         store.replay_wal(&mut memtable)?;
@@ -40,7 +50,7 @@ impl Engine {
     }
 
     /// Get the value for `key`, if any.
-    pub fn get(&mut self, key: &str) -> Result<Option<String>, Error> {
+    pub fn get(&self, key: &str) -> Result<Option<String>, Error> {
         if let Some(value) = self.memtable.get(key) {
             return Ok(value);
         }
@@ -92,7 +102,7 @@ mod test {
         let mut map = HashMap::new();
 
         _ = remove_dir_all(DIR);
-        let mut engine = Engine::new(PathBuf::from(DIR), EngineArgs {
+        let mut engine = Engine::with_args(PathBuf::from(DIR), EngineArgs {
             memtable: MemtableArgs { capacity: 10 },
             store: StoreArgs { compaction_enabled: true, compaction_interval_seconds: 0 },
         })

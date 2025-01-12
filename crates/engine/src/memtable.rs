@@ -1,6 +1,6 @@
 use std::collections::{btree_map, BTreeMap};
 
-use crate::env::parse_env;
+use crunch_common::env::parse_env;
 
 type Value = Option<String>;
 
@@ -16,7 +16,7 @@ pub struct MemtableArgs {
 
 impl MemtableArgs {
     pub fn from_env() -> Self {
-        let capacity = parse_env("memtable", "capacity", 1024);
+        let capacity = parse_env("engine", Some("memtable"), "capacity", 1024);
         Self { capacity }
     }
 }
