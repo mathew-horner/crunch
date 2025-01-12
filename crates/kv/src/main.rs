@@ -3,9 +3,12 @@ use std::sync::Arc;
 
 use crunch_common::env::parse_env;
 use crunch_engine::engine::Engine;
-use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
+use protocol::Command;
+use tokio::io;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::RwLock;
+
+mod protocol;
 
 #[tokio::main]
 async fn main() {
@@ -26,75 +29,46 @@ async fn main() {
     }
 }
 
-enum Command {
-    Get,
-    Set,
-    Delete,
-}
-
-impl Command {
-    fn from_u8_opt(indicator: u8) -> Option<Self> {
-        match indicator {
-            1 => Some(Self::Get),
-            2 => Some(Self::Set),
-            3 => Some(Self::Delete),
-            _ => None,
-        }
-    }
-}
-
 // TODO: Don't unwrap, and don't swallow errors.
 async fn handle_client(
     engine: Arc<RwLock<Engine>>,
     mut stream: TcpStream,
 ) -> Result<(), io::Error> {
     loop {
-        let indicator = stream.read_u8().await?;
-        let Some(command) = Command::from_u8_opt(indicator) else {
+        let Some(command) = protocol::read_command_indicator(&mut stream).await? else {
             continue;
         };
         match command {
             Command::Get => {
-                let key_size = stream.read_u32().await?;
-                let mut key_bytes = vec![0; key_size as usize];
-                stream.read_exact(&mut key_bytes).await?;
-                let key = std::str::from_utf8(&key_bytes).unwrap();
-
-                let value = engine.read().await.get(key).unwrap();
-                match value {
+                let data = protocol::read_data(&mut stream).await?;
+                let key = std::str::from_utf8(&data).unwrap();
+                match engine.read().await.get(key).unwrap() {
                     Some(value) => {
-                        stream.write_u8(1).await?;
-                        stream.write_all(value.as_bytes()).await?;
+                        protocol::write_success(&mut stream).await?;
+                        protocol::write_data(&mut stream, value.as_bytes()).await?;
                     },
                     None => {
-                        stream.write_u8(0).await?;
+                        protocol::write_failure(&mut stream).await?;
                     },
                 }
             },
             Command::Set => {
-                let key_size = stream.read_u32().await?;
-                let mut key_bytes = vec![0; key_size as usize];
-                stream.read_exact(&mut key_bytes).await?;
-                let key = std::str::from_utf8(&key_bytes).unwrap();
-
-                let value_size = stream.read_u32().await?;
-                let mut value_bytes = vec![0; value_size as usize];
-                stream.read_exact(&mut value_bytes).await?;
-                let value = std::str::from_utf8(&value_bytes).unwrap();
-
-                let result = engine.write().await.set(key, value);
-                let output = if result.is_ok() { 1 } else { 0 };
-                stream.write_u8(output).await?;
+                let key = protocol::read_data(&mut stream).await?;
+                let val = protocol::read_data(&mut stream).await?;
+                let key = std::str::from_utf8(&key).unwrap();
+                let val = std::str::from_utf8(&val).unwrap();
+                match engine.write().await.set(key, val) {
+                    Ok(_) => protocol::write_success(&mut stream).await?,
+                    Err(_) => protocol::write_failure(&mut stream).await?,
+                }
             },
             Command::Delete => {
-                let key_size = stream.read_u32().await?;
-                let mut key_bytes = vec![0; key_size as usize];
-                stream.read_exact(&mut key_bytes).await?;
-                let key = std::str::from_utf8(&key_bytes).unwrap();
-
-                let result = engine.write().await.delete(key);
-                let output = if result.is_ok() { 1 } else { 0 };
-                stream.write_u8(output).await?;
+                let data = protocol::read_data(&mut stream).await?;
+                let key = std::str::from_utf8(&data).unwrap();
+                match engine.write().await.delete(key) {
+                    Ok(_) => protocol::write_success(&mut stream).await?,
+                    Err(_) => protocol::write_failure(&mut stream).await?,
+                }
             },
         }
     }
