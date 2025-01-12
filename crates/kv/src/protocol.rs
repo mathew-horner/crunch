@@ -18,32 +18,36 @@ impl Command {
     }
 }
 
-pub async fn read_command_indicator(stream: &mut TcpStream) -> Result<Option<Command>, io::Error> {
-    let indicator = stream.read_u8().await?;
-    Ok(Command::from_u8_opt(indicator))
-}
+pub struct Stream(pub TcpStream);
 
-pub async fn read_data(stream: &mut TcpStream) -> Result<Vec<u8>, io::Error> {
-    let size = stream.read_u32().await?;
-    let mut bytes = vec![0; size as usize];
-    stream.read_exact(&mut bytes).await?;
-    Ok(bytes)
-}
+impl Stream {
+    pub async fn read_command_indicator(&mut self) -> Result<Option<Command>, io::Error> {
+        let indicator = self.0.read_u8().await?;
+        Ok(Command::from_u8_opt(indicator))
+    }
 
-pub async fn write_success(stream: &mut TcpStream) -> Result<(), io::Error> {
-    stream.write_u8(1).await?;
-    Ok(())
-}
+    pub async fn read_data(&mut self) -> Result<Vec<u8>, io::Error> {
+        let size = self.0.read_u32().await?;
+        let mut bytes = vec![0; size as usize];
+        self.0.read_exact(&mut bytes).await?;
+        Ok(bytes)
+    }
 
-pub async fn write_failure(stream: &mut TcpStream) -> Result<(), io::Error> {
-    stream.write_u8(0).await?;
-    Ok(())
-}
+    pub async fn write_success(&mut self) -> Result<(), io::Error> {
+        self.0.write_u8(1).await?;
+        Ok(())
+    }
 
-pub async fn write_data(stream: &mut TcpStream, data: &[u8]) -> Result<(), io::Error> {
-    // TODO: Bounds check this.
-    let size = data.len() as u32;
-    stream.write_u32(size).await?;
-    stream.write_all(data).await?;
-    Ok(())
+    pub async fn write_failure(&mut self) -> Result<(), io::Error> {
+        self.0.write_u8(0).await?;
+        Ok(())
+    }
+
+    pub async fn write_data(&mut self, data: &[u8]) -> Result<(), io::Error> {
+        // TODO: Bounds check this.
+        let size = data.len() as u32;
+        self.0.write_u32(size).await?;
+        self.0.write_all(data).await?;
+        Ok(())
+    }
 }

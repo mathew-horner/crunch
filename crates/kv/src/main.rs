@@ -30,44 +30,42 @@ async fn main() {
 }
 
 // TODO: Don't unwrap, and don't swallow errors.
-async fn handle_client(
-    engine: Arc<RwLock<Engine>>,
-    mut stream: TcpStream,
-) -> Result<(), io::Error> {
+async fn handle_client(engine: Arc<RwLock<Engine>>, stream: TcpStream) -> Result<(), io::Error> {
+    let mut stream = protocol::Stream(stream);
     loop {
-        let Some(command) = protocol::read_command_indicator(&mut stream).await? else {
+        let Some(command) = stream.read_command_indicator().await? else {
             continue;
         };
         match command {
             Command::Get => {
-                let data = protocol::read_data(&mut stream).await?;
+                let data = stream.read_data().await?;
                 let key = std::str::from_utf8(&data).unwrap();
                 match engine.read().await.get(key).unwrap() {
                     Some(value) => {
-                        protocol::write_success(&mut stream).await?;
-                        protocol::write_data(&mut stream, value.as_bytes()).await?;
+                        stream.write_success().await?;
+                        stream.write_data(value.as_bytes()).await?;
                     },
                     None => {
-                        protocol::write_failure(&mut stream).await?;
+                        stream.write_failure().await?;
                     },
                 }
             },
             Command::Set => {
-                let key = protocol::read_data(&mut stream).await?;
-                let val = protocol::read_data(&mut stream).await?;
+                let key = stream.read_data().await?;
+                let val = stream.read_data().await?;
                 let key = std::str::from_utf8(&key).unwrap();
                 let val = std::str::from_utf8(&val).unwrap();
                 match engine.write().await.set(key, val) {
-                    Ok(_) => protocol::write_success(&mut stream).await?,
-                    Err(_) => protocol::write_failure(&mut stream).await?,
+                    Ok(_) => stream.write_success().await?,
+                    Err(_) => stream.write_failure().await?,
                 }
             },
             Command::Delete => {
-                let data = protocol::read_data(&mut stream).await?;
+                let data = stream.read_data().await?;
                 let key = std::str::from_utf8(&data).unwrap();
                 match engine.write().await.delete(key) {
-                    Ok(_) => protocol::write_success(&mut stream).await?,
-                    Err(_) => protocol::write_failure(&mut stream).await?,
+                    Ok(_) => stream.write_success().await?,
+                    Err(_) => stream.write_failure().await?,
                 }
             },
         }
