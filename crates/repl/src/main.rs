@@ -1,6 +1,7 @@
 use std::io::stdin;
 
 use crunch_engine::engine::{Engine, EngineArgs};
+use crunch_engine::error::Error;
 use crunch_engine::memtable::MemtableArgs;
 use crunch_engine::store::StoreArgs;
 use crunch_engine::util::Assignment;
@@ -10,7 +11,8 @@ fn main() {
     let engine = Engine::new("test-db".into(), EngineArgs {
         memtable: MemtableArgs::from_env(),
         store: StoreArgs::from_env(),
-    });
+    })
+    .unwrap();
     repl(engine);
 }
 
@@ -48,24 +50,31 @@ fn repl(mut engine: Engine) {
                 let command = tokens[0].clone();
                 let argument = tokens[1..].join(" ");
 
+                fn exec(f: impl FnOnce() -> Result<(), Error>) {
+                    if let Err(err) = f() {
+                        error(err.to_string());
+                    }
+                }
+
+                fn error(message: impl AsRef<str>) {
+                    println!("Error: {}", message.as_ref());
+                }
+
                 match command.as_str() {
-                    "set" => match Assignment::parse(argument.as_str()) {
-                        Ok(Assignment { key, value }) => engine.set(key, value),
-                        Err(error) => println!("Error: {}", error),
+                    "set" => {
+                        exec(|| {
+                            let assignment = Assignment::parse(argument.as_str())?;
+                            engine.set(assignment.key, assignment.value)
+                        });
                     },
                     "get" => match engine.get(argument.as_ref()) {
-                        Some(value) => println!("{}", value),
-                        None => println!("Error: Not found!"),
+                        Ok(Some(value)) => println!("{}", value),
+                        Ok(None) => error("Not found"),
+                        Err(err) => error(err.to_string()),
                     },
-                    "del" => {
-                        engine.delete(argument.as_ref());
-                    },
-                    "inspect-segment" => {
-                        engine.store().inspect_segment(argument.as_ref());
-                    },
-                    _ => {
-                        println!("Error: Invalid command!");
-                    },
+                    "del" => exec(|| engine.delete(argument.as_ref())),
+                    "inspect-segment" => exec(|| engine.store().inspect_segment(argument.as_ref())),
+                    _ => error("Invalid command"),
                 };
             },
         };

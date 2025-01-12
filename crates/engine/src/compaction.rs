@@ -17,13 +17,13 @@ pub fn compaction_loop(
     let mut last_compaction = Instant::now();
     while !compaction_kill_flag.load(Ordering::Relaxed) {
         if last_compaction.elapsed().as_secs() >= interval_seconds {
-            let segments_read = segments.read().unwrap();
+            let segments_read = segments.read().expect("segments lock is poisoned");
             if segments_read.len() >= 2 {
                 let first = &segments_read[0];
                 let second = &segments_read[1];
                 log::debug!("starting compaction of {first:?} and {second:?}");
-                let mut first = File::open(first).unwrap();
-                let mut second = File::open(second).unwrap();
+                let mut first = File::open(first).expect("failed to open first segment file");
+                let mut second = File::open(second).expect("failed to open second segment file");
                 let new_segment_path = path.clone().join("new-segment.dat");
                 compact(&mut first, &mut second, new_segment_path.clone());
 
@@ -39,12 +39,12 @@ pub fn compaction_loop(
                 // section. We only need write locks on the two original segment files until the
                 // new one is swapped in. We still need a write lock on the buffer for the final
                 // `pop_front`, but the runtime of that is very short.
-                let mut segments_write = segments.write().unwrap();
-                fs::remove_file(&segments_write[0]).unwrap();
-                fs::remove_file(&segments_write[1]).unwrap();
-                fs::rename(&new_segment_path, &segments_write[1]).unwrap();
+                let mut segments_write = segments.write().expect("segments lock is poisoned");
+                fs::remove_file(&segments_write[0]).expect("failed to delete first segment file");
+                fs::remove_file(&segments_write[1]).expect("failed to delete second segment file");
+                fs::rename(&new_segment_path, &segments_write[1])
+                    .expect("failed to swap in new segment file");
                 segments_write.pop_front();
-
                 log::debug!("compaction finished");
             } else {
                 log::debug!("compaction loop ticked, but there was nothing to do");
@@ -56,28 +56,33 @@ pub fn compaction_loop(
 }
 
 fn compact(first: &mut File, second: &mut File, path: PathBuf) {
-    let mut new_segment =
-        OpenOptions::new().create_new(true).write(true).read(true).open(&path).unwrap();
+    let mut new_segment = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .read(true)
+        .open(&path)
+        .expect("failed to create new segment file");
 
-    let mut first_iter = EntryIter::from_start(first).peekable();
-    let mut second_iter = EntryIter::from_start(second).peekable();
+    let mut first_iter =
+        EntryIter::from_start(first).expect("failed to initialize first iter").peekable();
+    let mut second_iter =
+        EntryIter::from_start(second).expect("failed to initialize second iter").peekable();
 
     while let (Some(first_entry), Some(second_entry)) = (first_iter.peek(), second_iter.peek()) {
-        // TODO: Don't unwrap these...
         match first_entry.key().cmp(&second_entry.key()) {
             cmp::Ordering::Less => {
                 log::trace!("first ({first_entry:?}) -> {path:?}");
-                first_entry.write(&mut new_segment).unwrap();
+                first_entry.write(&mut new_segment).expect("failed to write to new segment file");
                 first_iter.next();
             },
             cmp::Ordering::Greater => {
                 log::trace!("second ({second_entry:?}) -> {path:?}");
-                second_entry.write(&mut new_segment).unwrap();
+                second_entry.write(&mut new_segment).expect("failed to write to new segment file");
                 second_iter.next();
             },
             cmp::Ordering::Equal => {
                 log::trace!("equal, dedupe ({second_entry:?}) -> {path:?}");
-                second_entry.write(&mut new_segment).unwrap();
+                second_entry.write(&mut new_segment).expect("failed to write to new segment file");
                 first_iter.next();
                 second_iter.next();
             },
@@ -86,12 +91,12 @@ fn compact(first: &mut File, second: &mut File, path: PathBuf) {
 
     while let Some(entry) = first_iter.next() {
         log::trace!("first ({entry:?}) -> {path:?}");
-        entry.write(&mut new_segment).unwrap();
+        entry.write(&mut new_segment).expect("failed to write to new segment file");
     }
 
     while let Some(entry) = second_iter.next() {
         log::trace!("second ({entry:?}) -> {path:?}");
-        entry.write(&mut new_segment).unwrap();
+        entry.write(&mut new_segment).expect("failed to write to new segment file");
     }
 }
 

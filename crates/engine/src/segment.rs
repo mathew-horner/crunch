@@ -3,9 +3,10 @@ use std::io::prelude::*;
 use std::io::{self, SeekFrom};
 use std::path::{Path, PathBuf};
 
+use anyhow::anyhow;
 use bloom::BloomFilter;
 
-use crate::error::{PairComponent, WriteError};
+use crate::error::{Error, PairComponent};
 use crate::sparse_index::SparseIndex;
 
 // TODO: These should probably be configurable at the Database level.
@@ -24,15 +25,15 @@ pub struct SegmentHandle {
 impl SegmentHandle {
     /// Open the segment file at the given path and initialize the associated
     /// data structures for lookups.
-    pub fn open(path: PathBuf) -> Self {
-        let mut file = File::open(&path).unwrap();
-        let size = EntryIter::from_start(&mut file).count() as u32;
+    pub fn open(path: PathBuf) -> Result<Self, io::Error> {
+        let mut file = File::open(&path)?;
+        let size = EntryIter::from_start(&mut file)?.count() as u32;
         log::trace!("size of {path:?}: {size}");
         let mut bloom_filter = BloomFilter::with_rate(BLOOM_FILTER_FALSE_POSITIVE_RATE, size);
         let mut sparse_index = SparseIndex::new();
         let mut elapsed_bytes = 0;
 
-        for (idx, entry) in EntryIter::from_start(&mut file).enumerate() {
+        for (idx, entry) in EntryIter::from_start(&mut file)?.enumerate() {
             bloom_filter.insert(entry.key());
             if idx % SPARSE_INDEX_RANGE_SIZE == 0 {
                 sparse_index.insert(entry.key(), elapsed_bytes);
@@ -40,11 +41,11 @@ impl SegmentHandle {
             elapsed_bytes += entry.stride() as u64;
         }
 
-        Self { file, path, bloom_filter, sparse_index }
+        Ok(Self { file, path, bloom_filter, sparse_index })
     }
 
     /// Read the value for `key` from this file, if any.
-    pub fn get(&mut self, key: &str) -> Option<Value> {
+    pub fn get(&mut self, key: &str) -> Result<Option<Value>, io::Error> {
         log::trace!("looking in {:?} for {key}", self.path);
 
         // Each lookup in the bloom filter has a chance of being a false positive, but
@@ -52,27 +53,27 @@ impl SegmentHandle {
         // returns false.
         if !self.bloom_filter.contains(&key) {
             log::trace!("{key} was not in bloom filter for {:?}", self.path);
-            return None;
+            return Ok(None);
         }
 
         let (start, end) = self.sparse_index.get_byte_range(key);
         let start = start.unwrap_or(0);
-        self.file.seek(SeekFrom::Start(start)).unwrap();
+        self.file.seek(SeekFrom::Start(start))?;
         log::trace!("byte range constrained to {start}..{end:?}");
 
         let mut elapsed_bytes = start;
         for entry in EntryIter::new(&mut self.file) {
-            if end.is_some() && elapsed_bytes >= end.unwrap() {
+            if end.is_some_and(|end| elapsed_bytes >= end) {
                 break;
             }
             match entry {
                 Entry::Assignment { key: k, value } if k == key => {
                     log::trace!("found {key} in {:?}", self.path);
-                    return Some(Some(value));
+                    return Ok(Some(Some(value)));
                 },
                 Entry::Tombstone { key: k } if k == key => {
                     log::trace!("found tombstone for {key} in {:?}", self.path);
-                    return Some(None);
+                    return Ok(Some(None));
                 },
                 _ => {},
             };
@@ -80,7 +81,7 @@ impl SegmentHandle {
         }
 
         log::trace!("{key} was not in {:?}", self.path);
-        None
+        Ok(None)
     }
 
     /// Print details about the inner state of the segment file and its
@@ -102,9 +103,50 @@ impl<'a> EntryIter<'a> {
     }
 
     /// Seeks to the start of the file before iteration.
-    pub fn from_start(file: &'a mut File) -> Self {
-        file.seek(SeekFrom::Start(0)).unwrap();
-        Self::new(file)
+    pub fn from_start(file: &'a mut File) -> Result<Self, io::Error> {
+        file.seek(SeekFrom::Start(0))?;
+        Ok(Self::new(file))
+    }
+
+    fn step(&mut self) -> anyhow::Result<Option<Entry>> {
+        let mut indicator = [0; 1];
+        match self.file.read_exact(&mut indicator) {
+            Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
+            error => error?,
+        };
+
+        match EntryIndicator::from_u8_opt(indicator[0]) {
+            Some(EntryIndicator::Assignment) => {
+                let mut size_bytes = [0; 4];
+                self.file.read_exact(&mut size_bytes)?;
+                let size = u32::from_be_bytes(size_bytes);
+                let mut key_buffer = vec![0; size as usize];
+                self.file.read_exact(&mut key_buffer)?;
+
+                let mut size_bytes = [0; 4];
+                self.file.read_exact(&mut size_bytes)?;
+                let size = u32::from_be_bytes(size_bytes);
+                let mut value_buffer = vec![0; size as usize];
+                self.file.read_exact(&mut value_buffer)?;
+
+                let key = std::str::from_utf8(&key_buffer)?;
+                let value = std::str::from_utf8(&value_buffer)?;
+                Ok(Some(Entry::Assignment { key: key.to_owned(), value: value.to_owned() }))
+            },
+            Some(EntryIndicator::Tombstone) => {
+                let mut size_bytes = [0; 4];
+                self.file.read_exact(&mut size_bytes)?;
+                let size = u32::from_be_bytes(size_bytes);
+                let mut key_buffer = vec![0; size as usize];
+                self.file.read_exact(&mut key_buffer)?;
+                let key = std::str::from_utf8(&key_buffer)?;
+                Ok(Some(Entry::Tombstone { key: key.to_owned() }))
+            },
+            None => {
+                let position = self.file.seek(SeekFrom::Current(0))?;
+                Err(anyhow!("failed to parse indicator {} @ {position}", indicator[0]))
+            },
+        }
     }
 }
 
@@ -112,46 +154,12 @@ impl Iterator for EntryIter<'_> {
     type Item = Entry;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let mut indicator = [0; 1];
-        match self.file.read_exact(&mut indicator) {
-            Ok(_) => {},
-            Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => return None,
-            error => error.unwrap(),
-        };
-
-        match EntryIndicator::from_u8_opt(indicator[0]) {
-            Some(EntryIndicator::Assignment) => {
-                let mut size_bytes = [0; 4];
-                self.file.read_exact(&mut size_bytes).unwrap();
-                let size = u32::from_be_bytes(size_bytes);
-                let mut key_buffer = vec![0; size as usize];
-                self.file.read_exact(&mut key_buffer).unwrap();
-
-                let mut size_bytes = [0; 4];
-                self.file.read_exact(&mut size_bytes).unwrap();
-                let size = u32::from_be_bytes(size_bytes);
-                let mut value_buffer = vec![0; size as usize];
-                self.file.read_exact(&mut value_buffer).unwrap();
-
-                let key = std::str::from_utf8(&key_buffer).unwrap();
-                let value = std::str::from_utf8(&value_buffer).unwrap();
-                Some(Entry::Assignment { key: key.to_owned(), value: value.to_owned() })
-            },
-            Some(EntryIndicator::Tombstone) => {
-                let mut size_bytes = [0; 4];
-                self.file.read_exact(&mut size_bytes).unwrap();
-                let size = u32::from_be_bytes(size_bytes);
-                let mut key_buffer = vec![0; size as usize];
-                self.file.read_exact(&mut key_buffer).unwrap();
-                let key = std::str::from_utf8(&key_buffer).unwrap();
-                Some(Entry::Tombstone { key: key.to_owned() })
-            },
-            None => {
-                let position = self.file.seek(SeekFrom::Current(0)).unwrap();
-                log::warn!("failed to parse indicator {} @ {position}", indicator[0]);
-                None
-            },
-        }
+        self.step()
+            .inspect_err(|error| {
+                log::warn!("failed to step entry iter: {error}");
+            })
+            .ok()
+            .flatten()
     }
 }
 
@@ -174,7 +182,7 @@ impl Entry {
         }
     }
 
-    pub fn write(&self, file: &mut File) -> Result<(), WriteError> {
+    pub fn write(&self, file: &mut File) -> Result<(), Error> {
         match self {
             Self::Assignment { key, value } => write(file, key, value),
             Self::Tombstone { key } => tombstone(file, key),
@@ -212,7 +220,7 @@ impl EntryIndicator {
 }
 
 /// Write a key-value pair to a data file in the custom binary format.
-pub fn write(file: &mut File, key: &str, value: &str) -> Result<(), WriteError> {
+pub fn write(file: &mut File, key: &str, value: &str) -> Result<(), Error> {
     let key_bytes = key.as_bytes();
     let value_bytes = value.as_bytes();
 
@@ -227,7 +235,7 @@ pub fn write(file: &mut File, key: &str, value: &str) -> Result<(), WriteError> 
     {
         let size = component_bytes.len();
         let size = u32::try_from(size)
-            .map_err(|_| WriteError::TooLarge(component, size, u32::max_value() as usize))?;
+            .map_err(|_| Error::TooLarge(component, size, u32::max_value() as usize))?;
         bytes.extend(size.to_be_bytes());
         bytes.extend(component_bytes);
     }
@@ -238,11 +246,11 @@ pub fn write(file: &mut File, key: &str, value: &str) -> Result<(), WriteError> 
 
 /// Write a deletion marker (tombstone) to a data file in the custom binary
 /// format.
-pub fn tombstone(file: &mut File, key: &str) -> Result<(), WriteError> {
+pub fn tombstone(file: &mut File, key: &str) -> Result<(), Error> {
     let key_bytes = key.as_bytes();
     let size = key_bytes.len();
     let size = u32::try_from(size)
-        .map_err(|_| WriteError::TooLarge(PairComponent::Key, size, u32::max_value() as usize))?;
+        .map_err(|_| Error::TooLarge(PairComponent::Key, size, u32::max_value() as usize))?;
 
     let mut bytes = Vec::with_capacity(size as usize + 4 + 1);
     bytes.extend([EntryIndicator::Tombstone as u8]);

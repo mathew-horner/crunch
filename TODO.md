@@ -1,8 +1,6 @@
-- PICKUP: Latest changes broke something, need to fix.
 - Handle partially written records which may corrupt data files.
 - Look into SSTable region compression?
 - Memtable flush in background thread, swap to new memtable to keep serving traffic.
 - De-duplicate code that handles Entry stride size.
 - Rename SS Table code appropriately.
-- Proper error handling
 - Remove redundancy in default config values
