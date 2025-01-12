@@ -6,8 +6,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread::{self, JoinHandle};
 
-use walkdir::WalkDir;
-
 use crate::compaction::compaction_loop;
 use crate::env::parse_env;
 use crate::error::Error;
@@ -167,23 +165,23 @@ impl Store {
 ///
 /// If one does, it returns the existing segment files to seed the [`Store`].
 fn initialize_store_at_path(path: &PathBuf) -> Result<VecDeque<PathBuf>, io::Error> {
-    let mut files = VecDeque::new();
     if !path.exists() {
         log::info!("no store detected at {path:?}, creating directory");
         create_dir_all(path)?;
+        Ok(VecDeque::new())
     } else {
         log::info!("existing store detected at {path:?}");
-        // TODO: We don't want to recursively walk the directory, what were you thinking
-        // 2022 me?
-        for entry in WalkDir::new(path).follow_links(false).into_iter().filter_map(Result::ok) {
-            let filename = entry.file_name().to_string_lossy();
-            // TODO: This is not a great way to detect / filter out non-segment files.
-            if filename.starts_with("segment") {
-                files.push_back(PathBuf::from(entry.path()));
-            }
-        }
+        Ok(std::fs::read_dir(path)?
+            .filter_map(|entry| {
+                let entry = entry.ok()?;
+                let filetype = entry.file_type().ok()?;
+                let filename = entry.file_name();
+                let filename = filename.to_str()?;
+                (filetype.is_file() && filename.starts_with("segment")).then_some(entry)
+            })
+            .map(|entry| PathBuf::from(entry.path()))
+            .collect())
     }
-    Ok(files)
 }
 
 /// Return the path to the WAL file in the given store.
