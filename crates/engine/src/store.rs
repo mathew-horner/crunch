@@ -10,7 +10,10 @@ use crate::compaction::compaction_loop;
 use crate::env::parse_env;
 use crate::error::Error;
 use crate::memtable::Memtable;
-use crate::segment::{self, segment_file_number, Entry, EntryIter, SegmentHandle};
+use crate::segment::{
+    self, is_segment_filename, segment_file_number, segment_filename, Entry, EntryIter,
+    SegmentHandle,
+};
 
 pub struct Store {
     path: PathBuf,
@@ -114,7 +117,7 @@ impl Store {
         // The id of the new segment file will be the highest one on disk + 1.
         let last_segment_id =
             self.segments.read()?.iter().last().and_then(segment_file_number).unwrap_or(0);
-        let path = self.path.clone().join(format!("segment-{}.dat", last_segment_id + 1));
+        let path = self.path.clone().join(segment_filename(last_segment_id + 1));
 
         let mut file = File::create(path.clone())?;
         for (key, value) in memtable.iter() {
@@ -177,7 +180,7 @@ fn initialize_store_at_path(path: &PathBuf) -> Result<VecDeque<PathBuf>, io::Err
                 let filetype = entry.file_type().ok()?;
                 let filename = entry.file_name();
                 let filename = filename.to_str()?;
-                (filetype.is_file() && filename.starts_with("segment")).then_some(entry)
+                (filetype.is_file() && is_segment_filename(filename)).then_some(entry)
             })
             .map(|entry| PathBuf::from(entry.path()))
             .collect())

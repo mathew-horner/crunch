@@ -1,6 +1,8 @@
 use std::fs::{create_dir, remove_dir_all, File};
 use std::path::{Path, PathBuf};
 
+use crate::segment::segment_filename;
+
 /// Manages disk resources such as segment files in automated tests.
 pub struct StoreFixture {
     path: PathBuf,
@@ -33,7 +35,7 @@ impl StoreFixture {
     pub fn allocate_segment_file(&mut self) -> PathBuf {
         let id = self.segment_files + 1;
         self.segment_files += 1;
-        self.path.join(format!("segment-{id}"))
+        self.path.join(segment_filename(id as u32))
     }
 }
 

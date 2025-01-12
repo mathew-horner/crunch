@@ -83,6 +83,7 @@ mod test {
     use rand::Rng;
 
     use super::*;
+    use crate::segment::is_segment_filename;
 
     #[test]
     fn sledgehammer() {
@@ -144,9 +145,7 @@ mod test {
         while std::fs::read_dir(DIR)
             .unwrap()
             .filter(|entry| {
-                // TODO: This should be abstracted into a function to not duplicate the
-                // definition of what a segment file is.
-                entry.as_ref().unwrap().file_name().to_str().unwrap().starts_with("segment")
+                is_segment_filename(entry.as_ref().unwrap().file_name().to_str().unwrap())
             })
             .count()
             >= 2

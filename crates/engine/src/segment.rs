@@ -273,3 +273,13 @@ pub fn segment_file_number(path: impl AsRef<Path>) -> Option<u32> {
         .parse()
         .ok()
 }
+
+/// Return the filename for the given segment file `number`.
+pub fn segment_filename(number: u32) -> String {
+    format!("segment-{number}.dat")
+}
+
+/// Return whether the given `filename` is a segment file.
+pub fn is_segment_filename(filename: &str) -> bool {
+    filename.starts_with("segment")
+}

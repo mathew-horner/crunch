@@ -4,3 +4,4 @@
 - De-duplicate code that handles Entry stride size.
 - Rename SS Table code appropriately.
 - Remove redundancy in default config values
+- Explore OS-level file locking
