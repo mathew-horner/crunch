@@ -8,15 +8,12 @@ use crunch_engine::util::Assignment;
 
 fn main() {
     env_logger::init();
-    let engine = Engine::new("test-db".into(), EngineArgs {
+    let mut engine = Engine::new("test-db".into(), EngineArgs {
         memtable: MemtableArgs::from_env(),
         store: StoreArgs::from_env(),
     })
     .unwrap();
-    repl(engine);
-}
 
-fn repl(mut engine: Engine) {
     println!("Crunch");
     println!("The worst key-value store on the planet!");
     println!();

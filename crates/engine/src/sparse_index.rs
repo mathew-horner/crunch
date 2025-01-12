@@ -1,8 +1,8 @@
-use std::collections::{btree_map, BTreeMap};
+use std::collections::BTreeMap;
 use std::ops::Bound;
 
-/// The sparse index keeps track of certain keys and their offset within segment
-/// files, to enable faster lookups.
+/// The sparse index keeps track of a subset of keys and their offsets within
+/// segment files, to enable faster lookups.
 pub struct SparseIndex {
     index: BTreeMap<String, u64>,
 }
@@ -12,25 +12,29 @@ impl SparseIndex {
         Self { index: BTreeMap::new() }
     }
 
+    /// Return the byte range in which the key would exist in the segment file.
+    ///
+    /// NOTE: This function does not actually guarantee existence.
     pub fn get_byte_range(&self, key: &str) -> (Option<u64>, Option<u64>) {
-        let start =
-            self.range(Bound::Unbounded, Bound::Included(key)).last().map(|(_, offset)| *offset);
-        let end =
-            self.range(Bound::Excluded(key), Bound::Unbounded).next().map(|(_, offset)| *offset);
+        let start = self
+            .index
+            .range::<str, (Bound<&str>, Bound<&str>)>((Bound::Unbounded, Bound::Included(key)))
+            .last()
+            .map(|(_, offset)| *offset);
+        let end = self
+            .index
+            .range::<str, (Bound<&str>, Bound<&str>)>((Bound::Excluded(key), Bound::Unbounded))
+            .next()
+            .map(|(_, offset)| *offset);
         (start, end)
     }
 
-    /// Index a `key` with the given `offset`.
     pub fn insert(&mut self, key: &str, offset: u64) {
         self.index.insert(key.into(), offset);
     }
 
     pub fn inner(&self) -> &BTreeMap<String, u64> {
         &self.index
-    }
-
-    fn range(&self, lower: Bound<&str>, upper: Bound<&str>) -> btree_map::Range<'_, String, u64> {
-        self.index.range::<str, (Bound<&str>, Bound<&str>)>((lower, upper))
     }
 }
 

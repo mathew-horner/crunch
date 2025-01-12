@@ -19,12 +19,7 @@ pub struct Store {
     path: PathBuf,
     segments: Arc<RwLock<VecDeque<PathBuf>>>,
     wal: File,
-
-    /// Flipping this flag to `true` will kill the compactor.
     compaction_kill_flag: Arc<AtomicBool>,
-
-    /// This handle can be used to wait for the compactor to gracefully exit,
-    /// which is triggered with the `compaction_kill_flag`
     compaction_join_handle: Option<JoinHandle<()>>,
 }
 
@@ -35,7 +30,6 @@ pub struct StoreArgs {
 }
 
 impl StoreArgs {
-    /// Get configuration values from store config environment variables.
     pub fn from_env() -> Self {
         let compaction_enabled = parse_env("store", "compaction_enabled", true);
         let compaction_interval_seconds = parse_env("store", "compaction_interval_seconds", 600);
@@ -50,7 +44,6 @@ impl Default for StoreArgs {
 }
 
 impl Store {
-    /// Initialize a store which will persist its data to the given directory.
     pub fn new(path: PathBuf, args: StoreArgs) -> Result<Self, Error> {
         let segments = initialize_store_at_path(&path)?;
         let wal = open_wal(&path)?;
@@ -80,12 +73,10 @@ impl Store {
         Ok(store)
     }
 
-    /// Append an assignment to the WAL.
     pub fn set(&mut self, key: &str, value: &str) -> Result<(), Error> {
         segment::write(&mut self.wal, key, value)
     }
 
-    /// Read the value for `key` from disk, if any.
     pub fn get(&mut self, key: &str) -> Result<Option<String>, Error> {
         let segments = self.segments.read()?;
         for segment in segments.iter().rev() {
@@ -98,12 +89,10 @@ impl Store {
         Ok(None)
     }
 
-    /// Append a tombstone to the WAL to indicate that a key should be deleted.
     pub fn delete(&mut self, key: &str) -> Result<(), Error> {
         segment::tombstone(&mut self.wal, key)
     }
 
-    /// Gracefully shutdown the store.
     pub fn stop(self) -> thread::Result<()> {
         self.compaction_kill_flag.swap(true, Ordering::Relaxed);
         if let Some(handle) = self.compaction_join_handle {
@@ -112,7 +101,6 @@ impl Store {
         Ok(())
     }
 
-    /// Write the contents of the `memtable` to a new segment file on disk.
     pub fn write_memtable(&mut self, memtable: &Memtable) -> Result<(), Error> {
         // The id of the new segment file will be the highest one on disk + 1.
         let last_segment_id =
@@ -139,7 +127,6 @@ impl Store {
         Ok(())
     }
 
-    /// Replay the WAL and seed the `memtable`.
     pub fn replay_wal(&mut self, memtable: &mut Memtable) -> Result<(), Error> {
         Ok(EntryIter::from_start(&mut self.wal)?.for_each(|entry| {
             match entry {
@@ -149,7 +136,6 @@ impl Store {
         }))
     }
 
-    /// Print details about the inner state of the segment file, if it exists.
     pub fn inspect_segment(&self, filename: &str) -> Result<(), Error> {
         let path = self.path.join(filename);
         let guard = self.segments.read()?;
@@ -187,12 +173,10 @@ fn initialize_store_at_path(path: &PathBuf) -> Result<VecDeque<PathBuf>, io::Err
     }
 }
 
-/// Return the path to the WAL file in the given store.
 fn wal_path(store_path: &Path) -> PathBuf {
     store_path.join("wal.dat")
 }
 
-/// Open or create the WAL file in the given store.
 fn open_wal(store_path: &Path) -> Result<File, io::Error> {
     let path = wal_path(store_path);
     OpenOptions::new().create(true).append(true).open(&path)

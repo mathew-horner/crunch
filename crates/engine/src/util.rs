@@ -1,4 +1,4 @@
-// TODO: This whole module can probably move to the repl crate.
+// TODO: The assignment code can probably move to the repl crate.
 use anyhow::{anyhow, Result};
 
 pub struct Assignment<'a> {
@@ -7,7 +7,6 @@ pub struct Assignment<'a> {
 }
 
 impl<'a> Assignment<'a> {
-    /// Parse user input into an assignment operation.
     pub fn parse(string: &'a str) -> Result<Assignment<'a>> {
         let (key, value) = string.split_once("=").ok_or_else(|| anyhow!("invalid input"))?;
         let key = key.trim();

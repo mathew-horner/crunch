@@ -23,8 +23,6 @@ pub struct SegmentHandle {
 }
 
 impl SegmentHandle {
-    /// Open the segment file at the given path and initialize the associated
-    /// data structures for lookups.
     pub fn open(path: PathBuf) -> Result<Self, io::Error> {
         let mut file = File::open(&path)?;
         let size = EntryIter::from_start(&mut file)?.count() as u32;
@@ -44,7 +42,6 @@ impl SegmentHandle {
         Ok(Self { file, path, bloom_filter, sparse_index })
     }
 
-    /// Read the value for `key` from this file, if any.
     pub fn get(&mut self, key: &str) -> Result<Option<Value>, io::Error> {
         log::trace!("looking in {:?} for {key}", self.path);
 
@@ -56,14 +53,14 @@ impl SegmentHandle {
             return Ok(None);
         }
 
-        let (start, end) = self.sparse_index.get_byte_range(key);
-        let start = start.unwrap_or(0);
-        self.file.seek(SeekFrom::Start(start))?;
-        log::trace!("byte range constrained to {start}..{end:?}");
+        let (byte_start, byte_end) = self.sparse_index.get_byte_range(key);
+        let byte_start = byte_start.unwrap_or(0);
+        self.file.seek(SeekFrom::Start(byte_start))?;
+        log::trace!("byte range constrained to {byte_start}..{byte_end:?}");
 
-        let mut elapsed_bytes = start;
+        let mut elapsed_bytes = byte_start;
         for entry in EntryIter::new(&mut self.file) {
-            if end.is_some_and(|end| elapsed_bytes >= end) {
+            if byte_end.is_some_and(|end| elapsed_bytes >= end) {
                 break;
             }
             match entry {
@@ -84,15 +81,13 @@ impl SegmentHandle {
         Ok(None)
     }
 
-    /// Print details about the inner state of the segment file and its
-    /// associated in-memory resources.
     pub fn inspect(&self) {
         println!("Sparse Index");
         self.sparse_index.inner().iter().for_each(|(key, offset)| println!("{key} @ {offset}"));
     }
 }
 
-/// Iterates over the entries in a segment file.
+/// Iterator over the entries in a segment file.
 pub struct EntryIter<'a> {
     file: &'a mut File,
 }
@@ -102,20 +97,20 @@ impl<'a> EntryIter<'a> {
         Self { file }
     }
 
-    /// Seeks to the start of the file before iteration.
+    /// Seek to the start of the file before iteration.
     pub fn from_start(file: &'a mut File) -> Result<Self, io::Error> {
         file.seek(SeekFrom::Start(0))?;
         Ok(Self::new(file))
     }
 
     fn step(&mut self) -> anyhow::Result<Option<Entry>> {
-        let mut indicator = [0; 1];
-        match self.file.read_exact(&mut indicator) {
+        let mut indicator_bytes = [0; 1];
+        match self.file.read_exact(&mut indicator_bytes) {
             Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
             error => error?,
         };
 
-        match EntryIndicator::from_u8_opt(indicator[0]) {
+        match EntryIndicator::from_u8_opt(indicator_bytes[0]) {
             Some(EntryIndicator::Assignment) => {
                 let mut size_bytes = [0; 4];
                 self.file.read_exact(&mut size_bytes)?;
@@ -144,7 +139,7 @@ impl<'a> EntryIter<'a> {
             },
             None => {
                 let position = self.file.seek(SeekFrom::Current(0))?;
-                Err(anyhow!("failed to parse indicator {} @ {position}", indicator[0]))
+                Err(anyhow!("failed to parse indicator {} @ {position}", indicator_bytes[0]))
             },
         }
     }
@@ -165,16 +160,11 @@ impl Iterator for EntryIter<'_> {
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum Entry {
-    /// A key-value assignment.
     Assignment { key: String, value: String },
-    /// A marker that a key is now deleted.
     Tombstone { key: String },
 }
 
 impl Entry {
-    /// An entry has a key whether it is an assignment or tombstone, this is a
-    /// helper method to extract that without having to pattern match at the
-    /// call site.
     pub fn key(&self) -> &String {
         match self {
             Self::Assignment { key, .. } => &key,
@@ -202,14 +192,11 @@ impl Entry {
 
 #[repr(u8)]
 enum EntryIndicator {
-    /// The data represents a key-value assignment.
     Assignment = 0,
-    /// The data represents a key deletion.
     Tombstone,
 }
 
 impl EntryIndicator {
-    /// Return the [`Indicator`] variant for a `u8`, if any.
     fn from_u8_opt(num: u8) -> Option<Self> {
         match num {
             0 => Some(Self::Assignment),
@@ -219,7 +206,6 @@ impl EntryIndicator {
     }
 }
 
-/// Write a key-value pair to a data file in the custom binary format.
 pub fn write(file: &mut File, key: &str, value: &str) -> Result<(), Error> {
     let key_bytes = key.as_bytes();
     let value_bytes = value.as_bytes();
@@ -244,8 +230,6 @@ pub fn write(file: &mut File, key: &str, value: &str) -> Result<(), Error> {
     Ok(())
 }
 
-/// Write a deletion marker (tombstone) to a data file in the custom binary
-/// format.
 pub fn tombstone(file: &mut File, key: &str) -> Result<(), Error> {
     let key_bytes = key.as_bytes();
     let size = key_bytes.len();
@@ -261,9 +245,6 @@ pub fn tombstone(file: &mut File, key: &str) -> Result<(), Error> {
     Ok(())
 }
 
-/// Return the number of the given segment file.
-///
-/// Example: `./my-db/segment-12.dat` -> `Some(12)`
 pub fn segment_file_number(path: impl AsRef<Path>) -> Option<u32> {
     path.as_ref()
         .file_name()?
@@ -274,12 +255,10 @@ pub fn segment_file_number(path: impl AsRef<Path>) -> Option<u32> {
         .ok()
 }
 
-/// Return the filename for the given segment file `number`.
 pub fn segment_filename(number: u32) -> String {
     format!("segment-{number}.dat")
 }
 
-/// Return whether the given `filename` is a segment file.
 pub fn is_segment_filename(filename: &str) -> bool {
     filename.starts_with("segment")
 }

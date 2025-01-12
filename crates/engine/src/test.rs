@@ -3,38 +3,40 @@ use std::path::{Path, PathBuf};
 
 use crate::segment::segment_filename;
 
-/// Manages disk resources such as segment files in automated tests.
 pub struct StoreFixture {
     path: PathBuf,
-    segment_files: usize,
+    segment_file_count: usize,
 }
 
 impl StoreFixture {
-    /// Create a new directory at `path` for a test run.
     pub fn init(path: impl AsRef<Path>) -> Self {
         _ = remove_dir_all(path.as_ref());
         create_dir(path.as_ref()).unwrap();
-        Self { path: PathBuf::from(path.as_ref()), segment_files: 0 }
+        Self { path: PathBuf::from(path.as_ref()), segment_file_count: 0 }
     }
 
-    /// Create a new segment file on disk with the given file `contents`.
+    /// Create a new segment file with the given `pairs` as its data.
+    ///
+    /// This function will sort the pairs in ascending lexicographical order by
+    /// key before it writes them.
     pub fn create_segment_file(
         &mut self,
         pairs: impl IntoIterator<Item = (&'static str, &'static str)>,
     ) -> File {
         let path = self.allocate_segment_file();
         let mut file = File::create_new(path).unwrap();
+        let mut pairs: Vec<_> = pairs.into_iter().collect();
+        pairs.sort_by_key(|pair| pair.0);
         pairs
             .into_iter()
             .for_each(|(key, value)| crate::segment::write(&mut file, key, value).unwrap());
         file
     }
 
-    /// Allocate an ID for a new segment file in the store and return its
-    /// assigned path.
+    /// Allocate an ID for a new file in the store and return its path.
     pub fn allocate_segment_file(&mut self) -> PathBuf {
-        let id = self.segment_files + 1;
-        self.segment_files += 1;
+        let id = self.segment_file_count + 1;
+        self.segment_file_count += 1;
         self.path.join(segment_filename(id as u32))
     }
 }

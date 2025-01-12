@@ -14,9 +14,9 @@ pub fn compaction_loop(
     segments: Arc<RwLock<VecDeque<PathBuf>>>,
     compaction_kill_flag: Arc<AtomicBool>,
 ) {
-    let mut last_compaction = Instant::now();
+    let mut last_compact_at = Instant::now();
     while !compaction_kill_flag.load(Ordering::Relaxed) {
-        if last_compaction.elapsed().as_secs() >= interval_seconds {
+        if last_compact_at.elapsed().as_secs() >= interval_seconds {
             let segments_read = segments.read().expect("segments lock is poisoned");
             if segments_read.len() >= 2 {
                 let first = &segments_read[0];
@@ -49,54 +49,55 @@ pub fn compaction_loop(
             } else {
                 log::debug!("compaction loop ticked, but there was nothing to do");
             }
-            last_compaction = Instant::now();
+            last_compact_at = Instant::now();
         }
         thread::sleep(Duration::from_secs(1));
     }
 }
 
-fn compact(first: &mut File, second: &mut File, path: PathBuf) {
-    let mut new_segment = OpenOptions::new()
+fn compact(file1: &mut File, file2: &mut File, path: PathBuf) {
+    let mut new_file = OpenOptions::new()
         .create_new(true)
         .write(true)
         .read(true)
         .open(&path)
         .expect("failed to create new segment file");
 
-    let mut first_iter =
-        EntryIter::from_start(first).expect("failed to initialize first iter").peekable();
-    let mut second_iter =
-        EntryIter::from_start(second).expect("failed to initialize second iter").peekable();
+    let mut file1_entries =
+        EntryIter::from_start(file1).expect("failed to initialize first iter").peekable();
+    let mut file2_entries =
+        EntryIter::from_start(file2).expect("failed to initialize second iter").peekable();
 
-    while let (Some(first_entry), Some(second_entry)) = (first_iter.peek(), second_iter.peek()) {
-        match first_entry.key().cmp(&second_entry.key()) {
+    while let (Some(file1_entry), Some(file2_entry)) = (file1_entries.peek(), file2_entries.peek())
+    {
+        match file1_entry.key().cmp(&file2_entry.key()) {
             cmp::Ordering::Less => {
-                log::trace!("first ({first_entry:?}) -> {path:?}");
-                first_entry.write(&mut new_segment).expect("failed to write to new segment file");
-                first_iter.next();
+                log::trace!("file1 ({file1_entry:?}) -> {path:?}");
+                file1_entry.write(&mut new_file).expect("failed to write to new file");
+                file1_entries.next();
             },
             cmp::Ordering::Greater => {
-                log::trace!("second ({second_entry:?}) -> {path:?}");
-                second_entry.write(&mut new_segment).expect("failed to write to new segment file");
-                second_iter.next();
+                log::trace!("file2 ({file2_entry:?}) -> {path:?}");
+                file2_entry.write(&mut new_file).expect("failed to write to new file");
+                file2_entries.next();
             },
             cmp::Ordering::Equal => {
-                log::trace!("equal, dedupe ({second_entry:?}) -> {path:?}");
-                second_entry.write(&mut new_segment).expect("failed to write to new segment file");
-                first_iter.next();
-                second_iter.next();
+                log::trace!("equal, dedupe ({file2_entry:?}) -> {path:?}");
+                file2_entry.write(&mut new_file).expect("failed to write to new file");
+                file1_entries.next();
+                file2_entries.next();
             },
         }
     }
 
-    while let Some(entry) = first_iter.next() {
-        log::trace!("first ({entry:?}) -> {path:?}");
-        entry.write(&mut new_segment).expect("failed to write to new segment file");
+    while let Some(entry) = file1_entries.next() {
+        log::trace!("file1 ({entry:?}) -> {path:?}");
+        entry.write(&mut new_file).expect("failed to write to new file");
     }
 
-    while let Some(entry) = second_iter.next() {
-        log::trace!("second ({entry:?}) -> {path:?}");
-        entry.write(&mut new_segment).expect("failed to write to new segment file");
+    while let Some(entry) = file2_entries.next() {
+        log::trace!("file1 ({entry:?}) -> {path:?}");
+        entry.write(&mut new_file).expect("failed to write to new file");
     }
 }
 

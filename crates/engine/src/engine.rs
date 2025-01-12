@@ -59,7 +59,6 @@ impl Engine {
         self.store.stop()
     }
 
-    /// Clear and write the contents of the memtable to disk.
     fn flush_memtable(&mut self) -> Result<(), Error> {
         log::debug!("memtable has hit capacity ({}), flushing to disk", self.memtable.capacity());
         self.store.write_memtable(&self.memtable)?;
@@ -67,7 +66,6 @@ impl Engine {
         Ok(())
     }
 
-    /// Return a reference to the underlying [`Store`].
     pub fn store(&self) -> &Store {
         &self.store
     }

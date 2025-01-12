@@ -1,7 +1,6 @@
 use crate::util::abort;
 
 pub trait FromEnv: Sized {
-    /// Parse an environment variable value to a type.
     fn from_env(value: &str) -> anyhow::Result<Self>;
 }
 
