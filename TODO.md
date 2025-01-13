@@ -5,3 +5,4 @@
 - Rename SS Table code appropriately.
 - Remove redundancy in default config values
 - Explore OS-level file locking
+- WAL replay seems to be broken...

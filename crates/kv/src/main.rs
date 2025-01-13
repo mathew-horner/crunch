@@ -17,6 +17,7 @@ async fn main() {
     let path: PathBuf = parse_env("kv", None, "path", "./data".into());
     let engine = Arc::new(RwLock::new(Engine::new(path).unwrap()));
     let listener = TcpListener::bind(("127.0.0.1", port)).await.unwrap();
+    log::info!("CrunchKV server listening on port {port}");
     loop {
         let stream = match listener.accept().await {
             Ok((stream, _)) => stream,
@@ -40,13 +41,16 @@ async fn handle_client(engine: Arc<RwLock<Engine>>, stream: TcpStream) -> Result
             Command::Get => {
                 let data = stream.read_data().await?;
                 let key = std::str::from_utf8(&data).unwrap();
+                log::trace!("GET {key}");
                 match engine.read().await.get(key).unwrap() {
                     Some(value) => {
+                        log::trace!("got {key} = {value}");
                         stream.write_success().await?;
                         stream.write_data(value.as_bytes()).await?;
                     },
                     None => {
-                        stream.write_failure().await?;
+                        log::trace!("{key} not found");
+                        stream.write_outcome(2).await?;
                     },
                 }
             },
@@ -55,6 +59,7 @@ async fn handle_client(engine: Arc<RwLock<Engine>>, stream: TcpStream) -> Result
                 let val = stream.read_data().await?;
                 let key = std::str::from_utf8(&key).unwrap();
                 let val = std::str::from_utf8(&val).unwrap();
+                log::trace!("SET {key}={val}");
                 match engine.write().await.set(key, val) {
                     Ok(_) => stream.write_success().await?,
                     Err(_) => stream.write_failure().await?,
@@ -63,6 +68,7 @@ async fn handle_client(engine: Arc<RwLock<Engine>>, stream: TcpStream) -> Result
             Command::Delete => {
                 let data = stream.read_data().await?;
                 let key = std::str::from_utf8(&data).unwrap();
+                log::trace!("DELETE {key}");
                 match engine.write().await.delete(key) {
                     Ok(_) => stream.write_success().await?,
                     Err(_) => stream.write_failure().await?,
