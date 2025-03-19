@@ -12,8 +12,7 @@ use crate::compaction::compaction_loop;
 use crate::error::Error;
 use crate::memtable::Memtable;
 use crate::segment::{
-    self, is_segment_filename, segment_file_number, segment_filename, Entry, EntryIter,
-    SegmentHandle,
+    self, is_segment_filename, segment_filename, segment_id, Entry, EntryIter, SegmentHandle,
 };
 
 pub struct Store {
@@ -105,19 +104,20 @@ impl Store {
 
     pub fn write_memtable(&mut self, memtable: &Memtable) -> Result<(), Error> {
         // The id of the new segment file will be the highest one on disk + 1.
-        let last_segment_id =
-            self.segments.read()?.iter().last().and_then(segment_file_number).unwrap_or(0);
-        let path = self.path.clone().join(segment_filename(last_segment_id + 1));
+        let last_segment = self.segments.read()?.iter().last();
+        let last_segment_id = last_segment.and_then(segment_id).unwrap_or(0);
+        let next_segment_id = last_segment_id + 1;
+        let next_segment_path = self.path.clone().join(segment_filename(next_segment_id));
 
-        let mut file = File::create(path.clone())?;
+        let mut next_segment = File::create(next_segment_path.clone())?;
         for (key, value) in memtable.iter() {
             match value {
-                Some(value) => segment::write(&mut file, key, value)?,
-                None => segment::tombstone(&mut file, key)?,
+                Some(value) => segment::write(&mut next_segment, key, value)?,
+                None => segment::tombstone(&mut next_segment, key)?,
             }
         }
-        log::debug!("wrote memtable to {path:?}");
-        self.segments.write()?.push_back(path);
+        log::debug!("wrote memtable to {next_segment_path:?}");
+        self.segments.write()?.push_back(next_segment_path);
 
         // Delete and recreate the WAL, which means that if the engine crashes after the
         // deletion and before the re-creation, there will be no WAL on disk. Since the

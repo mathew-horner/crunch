@@ -245,7 +245,7 @@ pub fn tombstone(file: &mut File, key: &str) -> Result<(), Error> {
     Ok(())
 }
 
-pub fn segment_file_number(path: impl AsRef<Path>) -> Option<u32> {
+pub fn segment_id(path: impl AsRef<Path>) -> Option<u32> {
     path.as_ref()
         .file_name()?
         .to_str()?
@@ -255,8 +255,8 @@ pub fn segment_file_number(path: impl AsRef<Path>) -> Option<u32> {
         .ok()
 }
 
-pub fn segment_filename(number: u32) -> String {
-    format!("segment-{number}.dat")
+pub fn segment_filename(id: u32) -> String {
+    format!("segment-{id}.dat")
 }
 
 pub fn is_segment_filename(filename: &str) -> bool {
