@@ -15,21 +15,33 @@ use crate::segment::{
     self, is_segment_filename, segment_filename, segment_id, Entry, EntryIter, SegmentHandle,
 };
 
+/// Handles disk I/O for the database engine.
 pub struct Store {
-    path: PathBuf,
+    directory: PathBuf,
     segments: Arc<RwLock<VecDeque<PathBuf>>>,
     wal: File,
+
+    /// Set to `true` to kill the compaction loop.
     compaction_kill_flag: Arc<AtomicBool>,
+
+    /// Wait on this after `compaction_kill_flag` is set to cleanly shut down
+    /// the compaction loop.
     compaction_join_handle: Option<JoinHandle<()>>,
 }
 
 #[derive(Debug)]
 pub struct StoreArgs {
+    /// When this is enabled, a background thread known as the "compaction loop"
+    /// runs and intermittently (on a period defined by
+    /// `compaction_interval_seconds`) compacts segment files together.
     pub compaction_enabled: bool,
+
     pub compaction_interval_seconds: u64,
 }
 
 impl StoreArgs {
+    /// Parse arguments from environment variables prefixed with
+    /// `CRUNCH_ENGINE_STORE`.
     pub fn from_env() -> Self {
         let compaction_enabled = parse_env("engine", Some("store"), "compaction_enabled", true);
         let compaction_interval_seconds =
@@ -45,11 +57,11 @@ impl Default for StoreArgs {
 }
 
 impl Store {
-    pub fn new(path: PathBuf, args: StoreArgs) -> Result<Self, Error> {
-        let segments = initialize_store_at_path(&path)?;
-        let wal = open_wal(&path)?;
+    pub fn new(directory: PathBuf, args: StoreArgs) -> Result<Self, Error> {
+        let segments = initialize_store_at_path(&directory)?;
+        let wal = open_wal(&directory)?;
         let mut store = Self {
-            path,
+            directory,
             segments: Arc::new(RwLock::new(segments)),
             wal,
             compaction_kill_flag: Arc::new(AtomicBool::new(false)),
@@ -57,7 +69,7 @@ impl Store {
         };
         if args.compaction_enabled {
             store.compaction_join_handle = Some({
-                let path = store.path.clone();
+                let path = store.directory.clone();
                 let segments = store.segments.clone();
                 let compaction_kill_flag = store.compaction_kill_flag.clone();
                 std::thread::spawn(move || {
@@ -74,10 +86,12 @@ impl Store {
         Ok(store)
     }
 
+    /// Write a `key`:`value` pair to the WAL.
     pub fn set(&mut self, key: &str, value: &str) -> Result<(), Error> {
         segment::write(&mut self.wal, key, value)
     }
 
+    /// Read `key`'s value from disk, if it exists.
     pub fn get(&self, key: &str) -> Result<Option<String>, Error> {
         let segments = self.segments.read()?;
         for segment in segments.iter().rev() {
@@ -90,10 +104,12 @@ impl Store {
         Ok(None)
     }
 
+    /// Write a tombstone for `key` to disk.
     pub fn delete(&mut self, key: &str) -> Result<(), Error> {
         segment::tombstone(&mut self.wal, key)
     }
 
+    /// Cleanly shut down the compaction loop, if it is running.
     pub fn stop(self) -> thread::Result<()> {
         self.compaction_kill_flag.swap(true, Ordering::Relaxed);
         if let Some(handle) = self.compaction_join_handle {
@@ -102,12 +118,13 @@ impl Store {
         Ok(())
     }
 
+    /// Write the contents of the `memtable` to a new segment file on disk.
     pub fn write_memtable(&mut self, memtable: &Memtable) -> Result<(), Error> {
         // The id of the new segment file will be the highest one on disk + 1.
         let last_segment_id = self.segments.read()?.iter().last().and_then(segment_id).unwrap_or(0);
         let next_segment_id = last_segment_id + 1;
-        let next_segment_path = self.path.clone().join(segment_filename(next_segment_id));
 
+        let next_segment_path = self.directory.clone().join(segment_filename(next_segment_id));
         let mut next_segment = File::create(next_segment_path.clone())?;
         for (key, value) in memtable.iter() {
             match value {
@@ -123,11 +140,12 @@ impl Store {
         // engine expects that it may have to recreate the WAL, and our engine is only
         // single threaded (outside of compaction, which only touches segment files),
         // this is fine.
-        remove_file(wal_path(&self.path))?;
-        self.wal = open_wal(&self.path)?;
+        remove_file(wal_path(&self.directory))?;
+        self.wal = open_wal(&self.directory)?;
         Ok(())
     }
 
+    /// Seed the `memtable` with the contents of the WAL.
     pub fn replay_wal(&mut self, memtable: &mut Memtable) -> Result<(), Error> {
         Ok(EntryIter::from_start(&mut self.wal)?.for_each(|entry| {
             match entry {
@@ -142,7 +160,7 @@ impl Store {
     }
 
     pub fn inspect_segment(&self, filename: &str) -> Result<(), Error> {
-        let path = self.path.join(filename);
+        let path = self.directory.join(filename);
         let guard = self.segments.read()?;
         let Some(segment) = guard.iter().find(|segment| **segment == path) else {
             println!("Error: segment not found");
