@@ -64,6 +64,11 @@ impl Engine {
         Ok(())
     }
 
+    /// List all keys in the database.
+    pub fn list(&self) -> Result<Vec<String>, Error> {
+        Ok(Vec::new())
+    }
+
     /// Gracefully shutdown the storage engine.
     pub fn stop(self) -> thread::Result<()> {
         self.store.stop()

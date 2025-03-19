@@ -238,6 +238,7 @@ dependencies = [
 name = "crunch-repl"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "crunch-engine",
  "env_logger",
 ]

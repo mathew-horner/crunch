@@ -138,6 +138,10 @@ impl Store {
         }))
     }
 
+    pub fn list_segments(&self) -> Result<Vec<PathBuf>, Error> {
+        Ok(self.segments.read()?.iter().cloned().collect())
+    }
+
     pub fn inspect_segment(&self, filename: &str) -> Result<(), Error> {
         let path = self.path.join(filename);
         let guard = self.segments.read()?;

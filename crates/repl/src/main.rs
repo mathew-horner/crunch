@@ -1,8 +1,66 @@
-use std::io::stdin;
+use std::io::{stdin, Write};
 
+use anyhow::anyhow;
 use crunch_engine::engine::Engine;
-use crunch_engine::error::Error;
-use crunch_engine::util::Assignment;
+
+enum Command {
+    Set { key: String, value: String },
+    Get { key: String },
+    Delete { key: String },
+    List,
+    SegmentList,
+    SegmentInspect { segment_file: String },
+    Exit,
+}
+
+impl Command {
+    /// Parse a [`Command`] from the given REPL input from the user.
+    fn parse(input: &str) -> anyhow::Result<Self> {
+        let input = input.trim().to_lowercase();
+        let tokens: Vec<_> = input.split(" ").collect();
+        match (tokens[0], tokens.len() - 1) {
+            // TODO: It's probably best UX to have this parse from key=value, but this is just
+            // easier for now.
+            ("set", 2) => {
+                Ok(Command::Set { key: tokens[1].to_owned(), value: tokens[2].to_owned() })
+            },
+            ("get", 1) => Ok(Command::Get { key: tokens[1].to_owned() }),
+            ("del", 1) => Ok(Command::Delete { key: tokens[1].to_owned() }),
+            ("list", 0) => Ok(Command::List),
+            ("segment-list", 0) => Ok(Command::SegmentList),
+            ("segment-inspect", 1) => {
+                Ok(Command::SegmentInspect { segment_file: tokens[1].to_owned() })
+            },
+            ("exit", 0) => Ok(Command::Exit),
+            _ => Err(anyhow!("invalid command")),
+        }
+    }
+
+    /// Execute this command against the database `engine`.
+    fn execute(&self, engine: &mut Engine) -> anyhow::Result<()> {
+        match self {
+            Self::Set { key, value } => engine.set(key, value)?,
+            Self::Get { key } => match engine.get(key) {
+                Ok(Some(value)) => println!("{value}"),
+                Ok(None) => return Err(anyhow!("not found")),
+                Err(error) => return Err(error.into()),
+            },
+            Self::Delete { key } => engine.delete(key)?,
+            Self::List => engine.list()?.into_iter().for_each(|key| println!("{key}")),
+            Self::SegmentList => engine
+                .store()
+                .list_segments()?
+                .into_iter()
+                .for_each(|segment| println!("{segment:?}")),
+            Self::SegmentInspect { segment_file } => {
+                engine.store().inspect_segment(segment_file)?;
+            },
+            // Exit will be handled by caller due to `Engine` ownership requirement.
+            Self::Exit => {},
+        }
+        Ok(())
+    }
+}
 
 fn main() {
     env_logger::init();
@@ -12,62 +70,34 @@ fn main() {
     println!("The worst key-value store on the planet!");
     println!();
     println!("Here is how to use:");
-    println!("SET key=value");
+    println!("SET key value");
     println!("GET key");
     println!("DEL key");
-    println!("INSPECT-SEGMENT segment");
+    println!("LIST");
+    println!("SEGMENT-LIST");
+    println!("SEGMENT-INSPECT segment");
     println!("EXIT");
     println!();
     println!("That's it - Have fun!");
 
     loop {
         let mut command = String::new();
-        stdin().read_line(&mut command).expect("Error: Failed to read command");
-
-        let command = command.trim().to_lowercase();
-        match command.as_str() {
-            "exit" => {
-                engine.stop().unwrap();
-                break;
-            },
-            _ => {
-                let tokens = command.split(" ").map(|t| t.to_string()).collect::<Vec<String>>();
-
-                if tokens.len() < 2 {
-                    println!("Error: Invalid command format!");
-                    continue;
-                }
-
-                let command = tokens[0].clone();
-                let argument = tokens[1..].join(" ");
-
-                fn exec(f: impl FnOnce() -> Result<(), Error>) {
-                    if let Err(err) = f() {
-                        error(err.to_string());
-                    }
-                }
-
-                fn error(message: impl AsRef<str>) {
-                    println!("Error: {}", message.as_ref());
-                }
-
-                match command.as_str() {
-                    "set" => {
-                        exec(|| {
-                            let assignment = Assignment::parse(argument.as_str())?;
-                            engine.set(assignment.key, assignment.value)
-                        });
-                    },
-                    "get" => match engine.get(argument.as_ref()) {
-                        Ok(Some(value)) => println!("{}", value),
-                        Ok(None) => error("Not found"),
-                        Err(err) => error(err.to_string()),
-                    },
-                    "del" => exec(|| engine.delete(argument.as_ref())),
-                    "inspect-segment" => exec(|| engine.store().inspect_segment(argument.as_ref())),
-                    _ => error("Invalid command"),
-                };
+        print!("> ");
+        std::io::stdout().flush().unwrap();
+        stdin().read_line(&mut command).expect("failed to read command");
+        let command = match Command::parse(&command) {
+            Ok(command) => command,
+            Err(error) => {
+                println!("error: {error}");
+                continue;
             },
         };
+        if let Err(error) = command.execute(&mut engine) {
+            println!("error: {error}");
+        }
+        if matches!(command, Command::Exit) {
+            engine.stop().unwrap();
+            break;
+        }
     }
 }
