@@ -181,5 +181,5 @@ fn wal_path(store_path: &Path) -> PathBuf {
 
 fn open_wal(store_path: &Path) -> Result<File, io::Error> {
     let path = wal_path(store_path);
-    OpenOptions::new().create(true).append(true).open(&path)
+    OpenOptions::new().create(true).append(true).read(true).open(&path)
 }
