@@ -25,6 +25,6 @@ These type placeholders are used throughout the environment variable table:
 
 ## Usage
 
-Right now, if you run `cargo run` you will get a REPL type interface for setting key-value pairs directly in the engine.
+Right now, if you run `cargo run --bin crunch-repl` you will get a REPL type interface for setting key-value pairs directly in the engine.
 This is useful for development, but eventually the database will run as its own server and allow arbitrary clients to
 communicate with it over the network.
