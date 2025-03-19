@@ -192,15 +192,15 @@ impl Entry {
 
 #[repr(u8)]
 enum EntryIndicator {
-    Assignment = 0,
+    Assignment = 1,
     Tombstone,
 }
 
 impl EntryIndicator {
     fn from_u8_opt(num: u8) -> Option<Self> {
         match num {
-            0 => Some(Self::Assignment),
-            1 => Some(Self::Tombstone),
+            1 => Some(Self::Assignment),
+            2 => Some(Self::Tombstone),
             _ => None,
         }
     }

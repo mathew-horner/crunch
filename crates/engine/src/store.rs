@@ -104,8 +104,7 @@ impl Store {
 
     pub fn write_memtable(&mut self, memtable: &Memtable) -> Result<(), Error> {
         // The id of the new segment file will be the highest one on disk + 1.
-        let last_segment = self.segments.read()?.iter().last();
-        let last_segment_id = last_segment.and_then(segment_id).unwrap_or(0);
+        let last_segment_id = self.segments.read()?.iter().last().and_then(segment_id).unwrap_or(0);
         let next_segment_id = last_segment_id + 1;
         let next_segment_path = self.path.clone().join(segment_filename(next_segment_id));
 
